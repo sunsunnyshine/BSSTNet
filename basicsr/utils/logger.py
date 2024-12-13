@@ -89,7 +89,7 @@ class MessageLogger():
         
         self.start_time = time.time()
         self.logger = get_root_logger()
-        show_dir_name = f"resuts/{self.exp_name}/train"
+        show_dir_name = f"results/{self.exp_name}/train"
         os.makedirs(show_dir_name, exist_ok=True)
         self.results_root = show_dir_name
 

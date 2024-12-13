@@ -111,7 +111,7 @@ class DeblurRecurrentDataset(data.Dataset):
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
 
-        scale = self.opt['scale']
+        scale = self.opt['scale'] if self.opt['scale'] is not None else 1
         gt_size = self.opt['gt_size']
         # key = self.keys[index]
         index = index%len(self.data_infos)
