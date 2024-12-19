@@ -12,5 +12,5 @@ if [ $# -ne 2 ] ;then
 fi
 
 PYTHONPATH="$(dirname $0)/..:${PYTHONPATH}" \
-python -m torch.distributed.launch --nproc_per_node=$GPUS --master_port=$PORT \
+python -m torch.distributed.launch --nproc_per_node=$GPUS --nnodes=2 --node_rank=0 --master_addr="115.156.212.64" --master_port=$PORT \
     basicsr/train.py -opt $CONFIG --launcher pytorch

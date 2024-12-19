@@ -50,7 +50,7 @@ def weight_reduce_loss(loss, weight=None, reduction='mean'):
             weight = weight.sum()
         else:
             weight = weight.sum() * loss.size(1)
-        loss = loss.sum() / weight
+        loss = loss.sum() / (weight + 1e-6)
 
     return loss
 
@@ -136,7 +136,7 @@ def get_refined_artifact_map(img_gt, img_output, img_ema, ksize):
     residual_ema = torch.sum(torch.abs(img_gt - img_ema), 1, keepdim=True)
     residual_sr = torch.sum(torch.abs(img_gt - img_output), 1, keepdim=True)
 
-    patch_level_weight = torch.var(residual_sr.clone(), dim=(-1, -2, -3), keepdim=True)**(1 / 5)
+    patch_level_weight = torch.var(residual_sr.clone(), dim=(-1, -2, -3), keepdim=True) ** (1 / 5)
     pixel_level_weight = get_local_weights(residual_sr.clone(), ksize)
     overall_weight = patch_level_weight * pixel_level_weight
 

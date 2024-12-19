@@ -40,7 +40,7 @@ def init_tb_loggers(opt):
     tb_logger = None
     if opt['logger'].get('use_tb_logger') and 'debug' not in opt['name']:
         tb_logger = init_tb_logger(log_dir=osp.join(opt['root_path'], 'tb_logger', opt['name']))
-    return tb_logger,wandb_logger
+    return tb_logger, wandb_logger
 
 
 def create_train_val_dataloader(opt, logger):
@@ -104,6 +104,7 @@ def load_resume_state(opt):
         check_resume(opt, resume_state['iter'])
     return resume_state
 
+
 def train_pipeline(root_path):
     # parse options, set distributed setting, set ramdom seed
     opt, args = parse_options(root_path, is_train=True)
@@ -112,7 +113,7 @@ def train_pipeline(root_path):
 
     torch.backends.cudnn.benchmark = True
     # torch.backends.cudnn.deterministic = True
-    
+
     # load resume states if necessary
     resume_state = load_resume_state(opt)
     # mkdir for experiments and logger
@@ -153,7 +154,7 @@ def train_pipeline(root_path):
         current_iter = 0
 
     # create message logger (formatted outputs)
-    msg_logger = MessageLogger(opt, current_iter, tb_logger,wandb_logger)
+    msg_logger = MessageLogger(opt, current_iter, tb_logger, wandb_logger)
 
     # dataloader prefetcher
     prefetch_mode = opt['datasets']['train'].get('prefetch_mode')
@@ -164,11 +165,9 @@ def train_pipeline(root_path):
         logger.info(f'Use {prefetch_mode} prefetch dataloader')
         if opt['datasets']['train'].get('pin_memory') is not True:
             raise ValueError('Please set pin_memory=True for CUDAPrefetcher.')
-    else:   
+    else:
         raise ValueError(f'Wrong prefetch_mode {prefetch_mode}.' "Supported ones are: None, 'cuda', 'cpu'.")
 
-
-    
     # training
     logger.info(f'Start training from epoch: {start_epoch}, iter: {current_iter}')
     data_timer, iter_timer = AvgTimer(), AvgTimer()
@@ -180,8 +179,6 @@ def train_pipeline(root_path):
     #
     #         model.validation(val_loader, current_iter, tb_logger,wandb_logger, opt['val']['save_img'])
 
-        
-    
     for epoch in range(start_epoch, total_epochs + 1):
         train_sampler.set_epoch(epoch)
         prefetcher.reset()
@@ -203,7 +200,7 @@ def train_pipeline(root_path):
                 # reset start time in msg_logger for more accurate eta_time
                 # not work in resume mode
                 msg_logger.reset_start_time()
-            
+
             # log
             # if True:
             if current_iter % opt['logger']['print_freq'] == 0:
@@ -250,8 +247,6 @@ def train_pipeline(root_path):
                 # msg_logger.log_video_images({"video":out_dict['show_motion_s'][0],"clip_name":"show_motion_s","iter":current_iter})
                 # msg_logger.log_video_images({"video":out_dict['show_motion_st'][0],"clip_name":"show_motion_st","iter":current_iter})
 
-
-            
             """ if (current_iter -1) % 20 == 0:
                 clip_name = train_data["folder"]
                 clip_data = model.get_current_training_data()
@@ -272,13 +267,12 @@ def train_pipeline(root_path):
                 visual_imgs = model.get_current_visuals()
                 if tb_logger:
                     for k, v in visual_imgs.items():
-                        tb_logger.add_images(f'ckpt_imgs/{k}', v.float().clamp(0, 1), current_iter)
+                        tb_logger.add_images(f'ckpt_imgs/{k}', v.flatten(0, 1).float().clamp(0, 1), current_iter)
 
             # save models and training states
             if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
                 logger.info('Saving models and training states.')
                 model.save(epoch, current_iter)
-            
 
             """ if current_iter % opt['logger']['save_latest_freq'] == 0:
                 logger.info('Saving models and training states.')
@@ -286,12 +280,12 @@ def train_pipeline(root_path):
 
             # validation
             if opt.get('val') is not None and (current_iter % opt['val']['val_freq'] == 0):
-            # if True:
+                # if True:
                 if len(val_loaders) > 1:
                     logger.warning('Multiple validation datasets are *only* supported by SRModel.')
                 for val_loader in val_loaders:
-                    model.validation(val_loader, current_iter, tb_logger,wandb_logger, opt['val']['save_img'])
-            
+                    model.validation(val_loader, current_iter, tb_logger, wandb_logger, opt['val']['save_img'])
+
             data_timer.start()
             iter_timer.start()
             train_data = prefetcher.next()

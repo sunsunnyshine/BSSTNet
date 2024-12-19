@@ -384,7 +384,7 @@ from scipy.ndimage import gaussian_filter
 
 
 @METRIC_REGISTRY.register()
-def ssim_calculate(img, img2, sd=1.5, C1=0.01**2, C2=0.03**2):
+def ssim_calculate(img, img2, sd=1.5, C1=0.01**2, C2=0.03**2, **kwargs):
     # Processing input image
     img1 = np.array(img, dtype=np.float32) / 255
     img1 = img1.transpose((2, 0, 1))
