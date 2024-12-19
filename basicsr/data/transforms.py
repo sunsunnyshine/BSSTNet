@@ -35,9 +35,8 @@ def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch
     if not isinstance(img_hms, list):
         img_hms = [img_hms]
 
-    # resize the img_hms to the same size as img_pms. Because our hardmask is generated from demo ,so its size is different from the img_pms [720,1080],numpy
-    img_hms = [np.resize(v, (img_pms[0].shape[0], img_pms[0].shape[1], img_pms[0].shape[2])) for v in img_hms]
-
+    # resize the img_hms to the same size as img_pms. Because our hardmask is generated from demo ,so its size is different from the img_pms [720,1080],cv2
+    img_hms = [cv2.resize(v, (img_pms[0].shape[1], img_pms[0].shape[0])) for v in img_hms]
 
     # determine input type: Numpy array or Tensor
     input_type = 'Tensor' if torch.is_tensor(img_gts[0]) else 'Numpy'

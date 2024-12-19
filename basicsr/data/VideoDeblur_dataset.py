@@ -177,8 +177,8 @@ class DeblurRecurrentDataset(data.Dataset):
         img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
 
         img_results = img2tensor(img_results)
-        img_gts = torch.stack(img_results[:len], dim=0)
-        img_lqs = torch.stack(img_results[len:2 * len], dim=0)
+        img_lqs = torch.stack(img_results[:len], dim=0)
+        img_gts = torch.stack(img_results[len:2 * len], dim=0)
         img_pms = torch.stack(img_results[2 * len:3*len], dim=0)
         img_hms = torch.stack(img_results[3 * len:], dim=0)
 
