@@ -5,7 +5,7 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: dvd_debug
+name: vdv_BSST
 model_type: ModelBSST
 manual_seed: 0
 num_gpu: auto
@@ -21,16 +21,17 @@ datasets:
   train:
     name: VideoDeblur
     type: DeblurRecurrentDataset
-    dataroot_gt: ./datasets/DVD/train/GT
-    dataroot_lq: ./datasets/DVD/train/blur
-    dataroot_pm: ./datasets/DVD/train/PredictMask
+    dataroot_gt: ./datasets/VDV/train/GT
+    dataroot_lq: ./datasets/VDV/train/blur
+    dataroot_pm: ./datasets/VDV/train/PredictMask
+    dataroot_hm: ./datasets/VDV/train/HardMask
 
-    meta_info_file: basicsr/data/meta_info/DVD_train.txt
+    meta_info_file: basicsr/data/meta_info/VDV_train.txt
     val_partition: ~
     test_mode: False
     io_backend:
       type: disk
-    file_end: jpg
+    file_end: png
     cache_data: false
 
     num_frame: 12
@@ -40,6 +41,7 @@ datasets:
     random_reverse: false
     use_hflip: True
     use_rot: true
+    force_blur_region_p: 0.8
 
     # data loader
     num_worker_per_gpu: 8
@@ -49,25 +51,28 @@ datasets:
     
 
   val:
-    name: dvd
+    name: vdv
     type: VideoRecurrentTestDatasetlocal
-    dataroot_gt: ./datasets/DVD/test/GT
-    dataroot_lq: ./datasets/DVD/test/blur
-    dataroot_pm: ./datasets/DVD/test/PredictMask
+    dataroot_gt: ./datasets/VDV/test/GT
+    dataroot_lq: ./datasets/VDV/test/blur
+    dataroot_pm: ./datasets/VDV/test/PredictMask
+    dataroot_hm: ./datasets/VDV/test/HardMask
 
     cache_data: false
     io_backend:
       type: disk
 
-    num_frame: 5
+    num_frame: 20
 
 path:
   pretrain_network_g: model_zoos/BSST_dvd.pth
-  strict_load_g: true
+  strict_load_g: false
   resume_state: ~
 
 train:
   optim_g:
+
+
     type: Adam
     lr: !!float 1e-4
     weight_decay: 0
@@ -90,7 +95,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 2500
+  val_freq: 2500
   save_img: false
   crop_size: 256
   max_minibatch: 1
@@ -102,12 +107,19 @@ val:
       test_y_channel: false
     ssim:
       type: ssim_calculate
+    weighted_psnr:
+      type: calculate_weighted_psnr
+      crop_border: 0
+      test_y_channel: false
+    weighted_ssim:
+        type: weighted_ssim_calculate
     
 # logging settings
 logger:
-  print_freq: 500
+  print_freq: 10
   save_checkpoint_freq: 2500
   use_tb_logger: true
+  show_tf_imgs_freq: 500
   wandb:
     project: ~
     resume_id: ~

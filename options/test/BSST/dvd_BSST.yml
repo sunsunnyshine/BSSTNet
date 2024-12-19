@@ -28,15 +28,15 @@ datasets:
     io_backend:
       type: disk
 
-    num_frame: 48  
+    num_frame: 24
 
 path:
-  pretrain_network_g: model_zoo/BSST_dvd.pth
+  pretrain_network_g: model_zoos/BSST_dvd.pth
   strict_load_g: true
 # validation settings
 val:
   val_freq: !!float 2500
-  save_img: false
+  save_img: true
   crop_size: 256
   max_minibatch: 1
 

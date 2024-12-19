@@ -14,11 +14,12 @@ from functools import reduce, lru_cache
 from operator import mul
 from einops import rearrange
 from einops.layers.torch import Rearrange
+from basicsr.utils.flow_loss import FlowWarpingLoss
 from basicsr.utils.registry import ARCH_REGISTRY
 from basicsr.ops.dcn import ModulatedDeformConvPack
-from basicsr.archs.propainter.sparse_transformer import TemporalSparseTransformerBlock,SoftComp,SoftSplit
+from basicsr.archs.propainter.sparse_transformer import TemporalSparseTransformerBlock, SoftComp, SoftSplit
 from basicsr.archs.propainter.recurrent_flow_completion import RecurrentFlowCompleteNet
-from basicsr.archs.gshift_arch import Encoder_shift_block,CAB,PixelShufflePack,SkipUpSample,conv,CAB1,CAB2
+from basicsr.archs.gshift_arch import Encoder_shift_block, CAB, PixelShufflePack, SkipUpSample, conv, CAB1, CAB2
 
 
 class SecondOrderDeformableAlignmentWithBlurmapguide(ModulatedDeformConvPack):
@@ -65,7 +66,7 @@ class SecondOrderDeformableAlignmentWithBlurmapguide(ModulatedDeformConvPack):
 
         _constant_init(self.conv_offset[-1], val=0, bias=0)
 
-    def forward(self, x, extra_feat, flow_1, flow_2, blur_map_1,blur_map_2):
+    def forward(self, x, extra_feat, flow_1, flow_2, blur_map_1, blur_map_2):
         # print("input_mean:{},std:{}".format(x.mean(),x.std()))
         extra_feat = torch.cat([extra_feat, flow_1, flow_2], dim=1)
         out = self.conv_offset(extra_feat)
@@ -78,25 +79,27 @@ class SecondOrderDeformableAlignmentWithBlurmapguide(ModulatedDeformConvPack):
         offset_2 = offset_2 + flow_2.flip(1).repeat(1, offset_2.size(1) // 2, 1, 1)
         offset = torch.cat([offset_1, offset_2], dim=1)
 
-
-        mask_1,mask_2 = torch.chunk(mask, 2, dim=1)
-        blur_map_1 = (2*blur_map_1 - 1)*0.1
-        blur_map_2 = (2*blur_map_2 - 1)*0.1
+        mask_1, mask_2 = torch.chunk(mask, 2, dim=1)
+        blur_map_1 = (2 * blur_map_1 - 1) * 0.1
+        blur_map_2 = (2 * blur_map_2 - 1) * 0.1
         mask_1 = mask_1 + blur_map_1.repeat(1, mask_1.size(1), 1, 1)
         mask_2 = mask_2 + blur_map_2.repeat(1, mask_1.size(1), 1, 1)
 
-        mask = torch.cat([mask_1,mask_2], dim=1)
-        
+        mask = torch.cat([mask_1, mask_2], dim=1)
+
         # mask
         mask = torch.sigmoid(mask)
         # mask = None
         output = torchvision.ops.deform_conv2d(x, offset, self.weight, self.bias, self.stride, self.padding,
-                                            self.dilation, mask)
+                                               self.dilation, mask)
         # print("output_mean:{},std:{}".format(output.mean(),output.std()))
         return output
 
+
 def length_sq(x):
     return torch.sum(torch.square(x), dim=1, keepdim=True)
+
+
 def fbConsistencyCheck(flow_fw, flow_bw, alpha1=0.01, alpha2=0.5):
     flow_bw_warped = flow_warp(flow_bw, flow_fw.permute(0, 2, 3, 1))  # wb(wf(x))
     flow_diff_fw = flow_fw + flow_bw_warped  # wf + wb(wf(x))
@@ -105,7 +108,8 @@ def fbConsistencyCheck(flow_fw, flow_bw, alpha1=0.01, alpha2=0.5):
     occ_thresh_fw = alpha1 * mag_sq_fw + alpha2
 
     fb_valid_fw = (length_sq(flow_diff_fw) < occ_thresh_fw).type_as(flow_fw)
-    return fb_valid_fw,flow_diff_fw
+    return fb_valid_fw, flow_diff_fw
+
 
 def flow_warp(x, flow, interp_mode='bilinear', padding_mode='zeros', align_corners=True):
     """Warp an image or feature map with optical flow.
@@ -157,6 +161,7 @@ def make_layer(block, num_blocks, **kwarg):
     for _ in range(num_blocks):
         layers.append(block(**kwarg))
     return nn.Sequential(*layers)
+
 
 def window_partition(x, window_size):
     """ Partition the input into windows. Attention will be conducted within the windows.
@@ -603,6 +608,7 @@ class RSTBWithInputConv(nn.Module):
         """
         return self.main(x)
 
+
 class Upsample(nn.Sequential):
     """Upsample module for video SR.
 
@@ -635,18 +641,25 @@ class Upsample(nn.Sequential):
             raise ValueError(f'scale {scale} is not supported. ' 'Supported scales: 2^n and 3.')
         super(Upsample, self).__init__(*m)
 
-def get_blur_map(flow_forwards,flow_backwards):
+
+''' 3.2. Blue Map Estimation equ(1) and equ(2)'''
+
+
+def get_blur_map(flow_forwards, flow_backwards):
     # flows: b,t-1,2,h,w
-    b,t,c,h,w = flow_forwards.shape
-    blur_map_first = length_sq(flow_backwards[:,0,...]).reshape(b,1,1,h,w)
-    blur_map_last = length_sq(flow_forwards[:,-1,...]).reshape(b,1,1,h,w)
-    blur_map = (length_sq(flow_backwards[:,1:,...].reshape(b*(t-1),2,h,w)) + length_sq(flow_forwards[:,:-1,...].reshape(b*(t-1),2,h,w)))/2
-    blur_map = blur_map.reshape(b,t-1,1,h,w)
-    blur_map = torch.cat([blur_map_first,blur_map,blur_map_last],dim=1)
-    blur_max,_ = torch.max(blur_map.reshape(b,-1),dim=-1)
-    blur_min,_ = torch.min(blur_map.reshape(b,-1),dim=-1)
-    blur_st = (blur_map - blur_min.reshape(b,1,1,1,1))/(blur_max-blur_min).reshape(b,1,1,1,1)
+    b, t, c, h, w = flow_forwards.shape
+    blur_map_first = length_sq(flow_backwards[:, 0, ...]).reshape(b, 1, 1, h, w)
+    blur_map_last = length_sq(flow_forwards[:, -1, ...]).reshape(b, 1, 1, h, w)
+    blur_map = (length_sq(flow_backwards[:, 1:, ...].reshape(b * (t - 1), 2, h, w)) + length_sq(
+        flow_forwards[:, :-1, ...].reshape(b * (t - 1), 2, h, w))) / 2
+    blur_map = blur_map.reshape(b, t - 1, 1, h, w)
+    blur_map = torch.cat([blur_map_first, blur_map, blur_map_last], dim=1)
+    blur_max, _ = torch.max(blur_map.reshape(b, -1), dim=-1)
+    blur_min, _ = torch.min(blur_map.reshape(b, -1), dim=-1)
+    blur_st = (blur_map - blur_min.reshape(b, 1, 1, 1, 1)) / (blur_max - blur_min).reshape(b, 1, 1, 1, 1)
     return blur_st
+
+
 @ARCH_REGISTRY.register()
 class BSST(nn.Module):
     """
@@ -670,6 +683,7 @@ class BSST(nn.Module):
             increase this number if you have a GPU with large memory.
             Default: 100. 
     """
+
     def __init__(self,
                  upscale=1,
                  clip_size=2,
@@ -690,15 +704,16 @@ class BSST(nn.Module):
         self.upscale = upscale
         self.cpu_cache_length = cpu_cache_length
         self.mid_channels = embed_dims[0]
-        
+
         self.feat_extract = nn.Sequential(nn.Conv2d(3, 64, 3, 1, 1),
-        CAB(64, 3, 4, bias=False, act=nn.LeakyReLU(negative_slope=0.1, inplace=True)))
+                                          CAB(64, 3, 4, bias=False, act=nn.LeakyReLU(negative_slope=0.1, inplace=True)))
         n_feat = 64
         kernel_size = 3
         reduction = 4
         bias = False
         act = nn.LeakyReLU(negative_slope=0.1, inplace=True)
-        self.concat = nn.Sequential(nn.Conv2d(3, n_feat, 3, 1, 1, bias=False), act,CAB(n_feat, kernel_size, reduction, bias=bias, act=act))
+        self.concat = nn.Sequential(nn.Conv2d(3, n_feat, 3, 1, 1, bias=False), act,
+                                    CAB(n_feat, kernel_size, reduction, bias=bias, act=act))
         self.act = nn.LeakyReLU(negative_slope=0.1, inplace=True)
         self.down01 = nn.Sequential(nn.Conv2d(n_feat, n_feat, 3, 2, 1, bias=False), act)
 
@@ -706,10 +721,8 @@ class BSST(nn.Module):
         self.encoder_level1_1 = CAB(n_feat, kernel_size, reduction, bias=bias, act=act)
         self.encoder_level2 = CAB(192, kernel_size, reduction, bias=bias, act=act)
         self.encoder_level2_1 = CAB(192, kernel_size, reduction, bias=bias, act=act)
-        
-        
+
         self.down12 = nn.Sequential(nn.Conv2d(n_feat, 192, 3, 2, 1, bias=False), act)
-        
 
         self.decoder_level1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
         self.decoder_level1_1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
@@ -719,90 +732,88 @@ class BSST(nn.Module):
         self.decoder_level2_2 = Encoder_shift_block(192, kernel_size, reduction, bias)
         self.skip_attn1 = CAB(n_feat, kernel_size, reduction, bias=bias, act=act)
         self.upsample0 = PixelShufflePack(64, 64, 2, upsample_kernel=3)
-        self.skip_conv = CAB(64, kernel_size, reduction, bias=bias, act=act) #conv(n_feat, n_feat, kernel_size, bias=bias)
+        self.skip_conv = CAB(64, kernel_size, reduction, bias=bias,
+                             act=act)  # conv(n_feat, n_feat, kernel_size, bias=bias)
         self.out_conv = CAB(64, kernel_size, reduction, bias=bias, act=act)
         self.last_conv = conv(64, 3, kernel_size, bias=bias)
         self.conv_hr0 = conv(64, 64, kernel_size, bias=bias)
 
         self.up21 = SkipUpSample(n_feat, 128)
-       
-
-
 
         # check if the sequence is augmented by flipping
         self.is_mirror_extended = False
         self.is_with_alignment = True
-        
+
         # recurrent feature refinement
         self.backbone = nn.ModuleDict()
         self.backbone_clip = nn.ModuleDict()
         self.deform_align = nn.ModuleDict()
-        modules = ['backward_1', 'forward_1','backward_2', 'forward_2']
+        modules = ['backward_1', 'forward_1', 'backward_2', 'forward_2']
         for i, module in enumerate(modules):
             # deformable attention
             self.deform_align[module] = SecondOrderDeformableAlignmentWithBlurmapguide(
-                    2 * embed_dims[0],
-                    embed_dims[0],
-                    3,
-                    padding=1,
-                    deformable_groups=16,
-                    max_residue_magnitude=max_residue_magnitude)
+                2 * embed_dims[0],
+                embed_dims[0],
+                3,
+                padding=1,
+                deformable_groups=16,
+                max_residue_magnitude=max_residue_magnitude)
 
             self.backbone[module] = nn.Sequential(
-                nn.Conv2d((2 + i) * embed_dims[0],embed_dims[0],3,1,1),
+                nn.Conv2d((2 + i) * embed_dims[0], embed_dims[0], 3, 1, 1),
                 self.act,
-                CAB1(embed_dims[0],3,4,False,self.act)
+                CAB1(embed_dims[0], 3, 4, False, self.act)
             )
-        
-        
-        
+
         self.reconstruction = RSTBWithInputConv(
-                                               in_channels= 5*embed_dims[0],
-                                               kernel_size=(1, 3, 3),
-                                               groups=inputconv_groups[5],
-                                               num_blocks=2,
-                                               dim=embed_dims[2],
-                                               input_resolution=[2, img_size[1], img_size[2]],
-                                               depth=depths[2],
-                                               num_heads=num_heads[2],
-                                               window_size=[2, window_size[1], window_size[2]],
-                                               mlp_ratio=mlp_ratio,
-                                               qkv_bias=qkv_bias, qk_scale=qk_scale,
-                                               norm_layer=norm_layer,
-                                               use_checkpoint_attn=[False],
-                                               use_checkpoint_ffn=[False]
-                                               )
+            in_channels=3 * embed_dims[0],
+            kernel_size=(1, 3, 3),
+            groups=inputconv_groups[5],
+            num_blocks=2,
+            dim=embed_dims[2],
+            input_resolution=[2, img_size[1], img_size[2]],
+            depth=depths[2],
+            num_heads=num_heads[2],
+            window_size=[2, window_size[1], window_size[2]],
+            mlp_ratio=mlp_ratio,
+            qkv_bias=qkv_bias, qk_scale=qk_scale,
+            norm_layer=norm_layer,
+            use_checkpoint_attn=[False],
+            use_checkpoint_ffn=[False]
+        )
 
         self.conv_before_upsampler = nn.Sequential(
-                                                  nn.Conv3d(embed_dims[-1], 64, kernel_size=(1, 1, 1),
-                                                            padding=(0, 0, 0)),
-                                                  nn.LeakyReLU(negative_slope=0.1, inplace=True)
-                                                  )
-        self.conv_before_input = nn.Sequential(   Rearrange('n d c h w -> n c d h w'),
-                                                  nn.Conv3d(embed_dims[-1], embed_dims[-1], kernel_size=(1, 3, 3),
-                                                            padding=(0, 1, 1)),
-                                                  nn.LeakyReLU(negative_slope=0.1, inplace=True),
-                                                  nn.Conv3d(embed_dims[-1], embed_dims[-1], kernel_size=(1, 3, 3),
-                                                            padding=(0, 1, 1)),
-                                                  Rearrange('n c d h w -> n d c h w')
-                                                  )
+            nn.Conv3d(embed_dims[-1], 64, kernel_size=(1, 1, 1),
+                      padding=(0, 0, 0)),
+            nn.LeakyReLU(negative_slope=0.1, inplace=True)
+        )
+        self.conv_before_input = nn.Sequential(Rearrange('n d c h w -> n c d h w'),
+                                               nn.Conv3d(embed_dims[-1], embed_dims[-1], kernel_size=(1, 3, 3),
+                                                         padding=(0, 1, 1)),
+                                               nn.LeakyReLU(negative_slope=0.1, inplace=True),
+                                               nn.Conv3d(embed_dims[-1], embed_dims[-1], kernel_size=(1, 3, 3),
+                                                         padding=(0, 1, 1)),
+                                               Rearrange('n c d h w -> n d c h w')
+                                               )
         self.upsampler = Upsample(4, 64)
         self.conv_last = nn.Conv3d(64, 3, kernel_size=(1, 3, 3), padding=(0, 1, 1))
-        
-        
+
         self.init_SparseTransformer()
-        
+
         self.blur_motion_refine = RecurrentFlowCompleteNet()
-        
+
+        self.blur_aware = FlowWarpingLoss()
+
     def init_weights(self, init_type='normal', gain=0.01):
         '''
         initialize network's weights
         init_type: normal | xavier | kaiming | orthogonal
         https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix/blob/9451e70673400885567d08a9e97ade2524c700d0/models/networks.py#L39
         '''
+
         def init_func(m):
             classname = m.__class__.__name__
-            
+
             if classname.find('InstanceNorm2d') != -1:
                 if hasattr(m, 'weight') and m.weight is not None:
                     nn.init.constant_(m.weight.data, 1.0)
@@ -837,43 +848,37 @@ class BSST(nn.Module):
             if hasattr(m, 'init_weights'):
                 m.init_weights(init_type, gain)
 
-    
-    
-    
-        
     def init_SparseTransformer(self):
+        # Sparse Transformer
         depths = 4
         self.depths = depths
         num_heads = 4
-        window_size = (8, 8)
+        # small the windows size
+        window_size = (4, 4)
         pool_size = (4, 4)
         self.fold_feat_size = (64, 64)
-
-
 
         kernel_size = (5, 5)
         padding = (2, 2)
         stride = (2, 2)
         t2t_params = {
-        'kernel_size': kernel_size,
-        'stride': stride,
-        'padding': padding
+            'kernel_size': kernel_size,
+            'stride': stride,
+            'padding': padding
         }
-        
-        self.softsplit = SoftSplit(192, 512, kernel_size, stride, padding,gain=0.01)
-        self.softcomp = SoftComp(192, 512, kernel_size, stride, padding,gain=0.01)
-        self.transsqattn = TemporalSparseTransformerBlock(512,num_heads,window_size,pool_size,depths=depths,t2t_params=t2t_params,gain=0.01)
+
+        self.softsplit = SoftSplit(192, 512, kernel_size, stride, padding, gain=0.01)
+        self.softcomp = SoftComp(192, 512, kernel_size, stride, padding, gain=0.01)
+        self.transsqattn = TemporalSparseTransformerBlock(512, num_heads, window_size, pool_size, depths=depths,
+                                                          t2t_params=t2t_params, gain=0.01)
         self.max_pool = nn.AvgPool2d(kernel_size, stride, padding)
         # self.max_pool2 = nn.MaxPool2d((4,4), (4,4), (0,0))
         self.max_pool2 = nn.AvgPool2d(window_size, window_size, (0, 0))
         self.avg_pool = nn.AvgPool2d(kernel_size, stride, padding)
         self.cabattn = nn.Sequential(
-            CAB2(192, 5, 4, bias=False, act=self.act, add_channel=192), 
+            CAB2(192, 5, 4, bias=False, act=self.act, add_channel=192),
             CAB1(192, 5, 4, bias=False, act=self.act)
         )
-
-        
-        
 
     def check_if_mirror_extended(self, lqs):
         """Check whether the input is a mirror-extended sequence.
@@ -908,11 +913,10 @@ class BSST(nn.Module):
         blur_map_n1 = flows.new_zeros(n, 1, h, w)
         for i, idx in enumerate(frame_idx):
             # print(frame_idx[i])
-            
+
             feat_current = feats[last_key][mapping_idx[idx]]
             blur_map_current = blur_motion_map[:, frame_idx[i], :, :, :]
-            
-            
+
             # print(idx)
             if self.cpu_cache:
                 feat_current = feat_current.cuda()
@@ -921,16 +925,15 @@ class BSST(nn.Module):
             if i > 0 and self.is_with_alignment:
                 flow_n1 = flows[:, flow_idx[i], :, :, :]
                 flow_n1_check = flows_check[:, flow_idx[i], :, :, :]
-                blur_map_n1 = blur_motion_map[:, frame_idx[i-1], :, :, :]
+                blur_map_n1 = blur_motion_map[:, frame_idx[i - 1], :, :, :]
                 # print(frame_idx[i-1])
                 if self.cpu_cache:
                     flow_n1 = flow_n1.cuda()
 
                 cond_n1 = flow_warp(feat_prop, flow_n1.permute(0, 2, 3, 1))
                 blur_map_n1 = flow_warp(blur_map_n1, flow_n1.permute(0, 2, 3, 1))
-                flow_n1_valid,_ = fbConsistencyCheck(flow_n1,flow_n1_check)
+                flow_n1_valid, _ = fbConsistencyCheck(flow_n1, flow_n1_check)
 
-                
                 # initialize second-order features
                 feat_n2 = torch.zeros_like(feat_prop)
                 flow_n2 = torch.zeros_like(flow_n1)
@@ -945,8 +948,8 @@ class BSST(nn.Module):
 
                     flow_n2 = flows[:, flow_idx[i - 1], :, :, :]
                     flow_n2_check = flows_check[:, flow_idx[i - 1], :, :, :]
-                    
-                    blur_map_n2 = blur_motion_map[:, frame_idx[i-2], :, :, :]
+
+                    blur_map_n2 = blur_motion_map[:, frame_idx[i - 2], :, :, :]
                     # print(frame_idx[i-2])
                     if self.cpu_cache:
                         flow_n2 = flow_n2.cuda()
@@ -955,13 +958,16 @@ class BSST(nn.Module):
                     flow_n2_check = flow_n1_check + flow_warp(flow_n2_check, flow_n1_check.permute(0, 2, 3, 1))
                     cond_n2 = flow_warp(feat_n2, flow_n2.permute(0, 2, 3, 1))
                     blur_map_n2 = flow_warp(blur_map_n2, flow_n2.permute(0, 2, 3, 1))
-                    flow_n2_valid,_ = fbConsistencyCheck(flow_n2,flow_n2_check)
-                    
+                    flow_n2_valid, _ = fbConsistencyCheck(flow_n2, flow_n2_check)
+
                 # flow-guided deformable convolution
-                cond = torch.cat([ cond_n1 ,feat_current, cond_n2 , blur_map_n1, blur_map_current, blur_map_n2,flow_n1_valid,flow_n2_valid], dim=1)
+                cond = torch.cat(
+                    [cond_n1, feat_current, cond_n2, blur_map_n1, blur_map_current, blur_map_n2, flow_n1_valid,
+                     flow_n2_valid], dim=1)
                 feat_prop = torch.cat([feat_prop, feat_n2], dim=1)
-                feat_prop = self.deform_align[module_name](feat_prop, cond, flow_n1, flow_n2, blur_map_n1*flow_n1_valid, blur_map_n2*flow_n2_valid)
-            
+                feat_prop = self.deform_align[module_name](feat_prop, cond, flow_n1, flow_n2,
+                                                           blur_map_n1 * flow_n1_valid, blur_map_n2 * flow_n2_valid)
+
             # concatenate and residual blocks
             feat = [feats[k][idx] for k in feats if k not in [module_name]] + [feat_prop]
             if self.cpu_cache:
@@ -970,14 +976,13 @@ class BSST(nn.Module):
             feat = torch.cat(feat, dim=1)
             feat_prop = feat_prop + self.backbone[module_name](feat)
             feats[module_name].append(feat_prop)
-            
+
             if self.cpu_cache:
                 feats[module_name][-1] = feats[module_name][-1].cpu()
                 torch.cuda.empty_cache()
 
         if 'backward' in module_name:
             feats[module_name] = feats[module_name][::-1]
-        
 
         return feats
 
@@ -986,14 +991,14 @@ class BSST(nn.Module):
         hr = self.conv_last(self.upsampler(self.conv_before_upsampler(hr.transpose(1, 2)))).transpose(1, 2)
         hr += lqs
         return hr
-        
 
-    def forward(self, lqs,flows_forwards_gt,flows_backwards_gt):
+    def forward(self, lqs, pms, flows_forwards_gt, flows_backwards_gt):
         """Forward function for BSSTNet.
 
         Args:
             lqs (tensor): Input low quality sequence with
                 shape (n, t, 3, 256, 256).
+            pms (tensor): Salient object detection maps with shape (n, t, 3, 256, 256).
 
         Returns:
             Tensor: Output HR sequence with shape (n, t, 3, 256, 256).
@@ -1001,14 +1006,14 @@ class BSST(nn.Module):
         # start_time = time.time()
         n, t, _, h, w = lqs.size()
 
+        #
+        pms = pms[:, :, 1, ...].unsqueeze(2)
+
         # whether to cache the features in CPU
         self.cpu_cache = True if t > self.cpu_cache_length else False
 
-        
-
         # check whether the input is an extended sequence
         self.check_if_mirror_extended(lqs)
-        
 
         # shallow feature extractions
         feats = {}
@@ -1024,18 +1029,31 @@ class BSST(nn.Module):
         enc22 = self.encoder_level2_1(enc2)
         feat_ = enc22.unsqueeze(0)
         ############################################
-        feats['spatial'] = [feat_[:,i,...] for i in range(feat_.size(1))]
+        feats['spatial'] = [feat_[:, i, ...] for i in range(feat_.size(1))]
 
         flows_forward, flows_backward = flows_forwards_gt, flows_backwards_gt
-        pred_motion_st_blur_map = get_blur_map(flows_forwards_gt,flows_backwards_gt)
-        
-        flows_forward, flows_backward = self.blur_motion_refine.forward_bidirect_flow(pred_motion_st_blur_map,[flows_forward, flows_backward])
-        
-        blur_map_st = get_blur_map(flows_forward, flows_backward)
-        blur_map_st = blur_map_st.detach()
-        
-        
-        for iter_ in [1, 2]:
+        pred_motion_st_blur_map = get_blur_map(flows_forwards_gt, flows_backwards_gt)
+
+        flows_forward, flows_backward = self.blur_motion_refine.forward_bidirect_flow(pred_motion_st_blur_map,
+                                                                                      [flows_forward, flows_backward])
+
+        # temporal sharpness prior ,from https://github.com/csbhr/CDVD-TSP 4.3
+        # lqs.shape [B,T,C,H,W]
+        # blur_score = 1-exp(x), shape is [B, T, 1, H, W]
+        blur_map = torch.cat((torch.zeros((1, 1, *flows_forward.shape[-2:])).to(lqs.device),
+                              self.blur_aware(lqs[0, :-1, ...], lqs[0, 1:, ...], flows_forward.squeeze(0))), dim=0) + \
+                   torch.cat((self.blur_aware(lqs[0, 1:, ...], lqs[0, :-1, ...], flows_backward.squeeze(0)),
+                              torch.zeros((1, 1, *flows_forward.shape[-2:])).to(lqs.device)),
+                             dim=0)
+        blur_map[1:-1, :, :, :] /= 2
+        sharp_map_st = torch.exp(-1 * blur_map)
+        sharp_map_st = sharp_map_st.detach()
+        pms = pms.detach()
+        pms = F.interpolate(pms[0], size=blur_map.shape[-2:], mode='bilinear', align_corners=False)
+        target_and_sharp = (sharp_map_st * pms).unsqueeze(0)
+
+        # Target-aware bidirectional feature propagation
+        for iter_ in [1]:
             for direction in ['backward', 'forward']:
                 if direction == 'backward':
                     flows = flows_backward
@@ -1045,99 +1063,83 @@ class BSST(nn.Module):
                     flows_check = flows_backward
                 module_name = f'{direction}_{iter_}'
                 feats[module_name] = []
-                feats = self.propagate(feats, flows,flows_check,1-blur_map_st, module_name)
-        
-        
-        
-        
+                # only propagation the salient object features
+                feats = self.propagate(feats, flows, flows_check, target_and_sharp, module_name)
+
         feats['spatial'] = torch.stack(feats['spatial'], 1)
         feats['backward_1'] = torch.stack(feats['backward_1'], 1)
         feats['forward_1'] = torch.stack(feats['forward_1'], 1)
-        feats['backward_2'] = torch.stack(feats['backward_2'], 1)
-        feats['forward_2'] = torch.stack(feats['forward_2'], 1)
-        
-
-        
-
-        
 
         hr = torch.cat([feats[k] for k in feats], dim=2)
         input_feats = self.reconstruction(hr)
-        
 
-        
-        mask = blur_map_st.view(n,t,1, h//4, w//4)
-    
-        n,t,c, h, w = blur_map_st.shape
-        
-        blur_map_st_win = self.max_pool(blur_map_st.view(n*t,c, h, w))
-        blur_map_st_win = self.max_pool2(blur_map_st_win)
-        blur_map_st_win = blur_map_st_win.view(n*t,1,blur_map_st_win.shape[-2],blur_map_st_win.shape[-1])
-        _,c,h,w = blur_map_st_win.shape
-        blur_map_st_win = blur_map_st_win.view(n,t,c,h,w)
-        # Spatial Sparse
-        blur_map_st_win_hard_map = torch.where(blur_map_st_win>0.3,torch.ones_like(blur_map_st_win),torch.zeros_like(blur_map_st_win))
+        # The source for Sparse Transformer
+        n, t, c, h, w = pms.unsqueeze(0).shape
 
-        # Temporal Sparse
+        pms_win = self.max_pool(pms.view(n * t, c, h, w))
+        sharp_map_st_win = self.max_pool(sharp_map_st.view(n * t, c, h, w))
+        pms_win = self.max_pool2(pms_win)
+        sharp_map_st_win = self.max_pool2(sharp_map_st_win)
+        pms_win = pms_win.view(n * t, 1, pms_win.shape[-2], pms_win.shape[-1])
+        sharp_map_st_win = sharp_map_st_win.view(n * t, 1, sharp_map_st_win.shape[-2], sharp_map_st_win.shape[-1])
+        _, c, h, w = pms_win.shape
+        pms_win = pms_win.view(n, t, c, h, w)
+        sharp_map_st_win = sharp_map_st_win.view(n, t, c, h, w)
+
+
+        # Spatial Sparse: only reserve the area where target used to appear.
+        pms_win_hard_map = torch.where(pms_win > 0.3, torch.ones_like(pms_win), torch.zeros_like(pms_win))
+
+        # Temporal Sparse:
+        # for query token : only reserve the blur area where target used to appear.
+        # for key/value token : only reserve the sharp area.
         T_ind = [torch.arange(i, t, 2) for i in range(2)] * (self.depths // 2)
         T_ind_zero = T_ind[::-1]
 
         qmasks = []
         kvmasks = []
-        
-        for T_idxs,T_idxs_zero in zip(T_ind,T_ind_zero):
-            mask = blur_map_st_win_hard_map[:,T_idxs].sum(1,keepdim=True)
-            mask = mask.clip(0,1)
 
-            
-            blur_map_st_win_q_soft = blur_map_st_win
-            blur_map_st_win_q_soft[:,T_idxs_zero] = blur_map_st_win_q_soft[:,T_idxs_zero]*0.
-            q_idx = torch.argsort(blur_map_st_win_q_soft,1,True)
-            qmask = torch.zeros_like(blur_map_st_win)
-            
+        for T_idxs, T_idxs_zero in zip(T_ind, T_ind_zero):
+            mask = pms_win_hard_map[:, T_idxs].sum(1, keepdim=True)
+            mask = mask.clip(0, 1)
 
-                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                
-            blur_map_st_win_kv_soft = (1 - blur_map_st_win)
-            blur_map_st_win_kv_soft[:,T_idxs_zero] = blur_map_st_win_kv_soft[:,T_idxs_zero]*0.
-            kv_idx = torch.argsort(blur_map_st_win_kv_soft,1,True) 
-            kvmask = torch.zeros_like(blur_map_st_win)
+            q_soft = pms_win * (torch.ones(sharp_map_st_win.shape).to(pms_win.device) - sharp_map_st_win)
+            q_soft[:, T_idxs_zero] = q_soft[:, T_idxs_zero] * 0.
+            q_idx = torch.argsort(q_soft, 1, True)
+            qmask = torch.zeros_like(sharp_map_st_win)
 
-            
-            kvmask = kvmask.scatter_(1,kv_idx[:,:len(T_idxs)//2],1)*mask
-            qmask = qmask.scatter_(1,q_idx[:,:len(T_idxs)//2],1)*mask
+            kv_soft = sharp_map_st_win
+            kv_soft[:, T_idxs_zero] = kv_soft[:, T_idxs_zero] * 0.
+            kv_idx = torch.argsort(kv_soft, 1, True)
+            kvmask = torch.zeros_like(sharp_map_st_win)
+
+            kvmask = kvmask.scatter_(1, kv_idx[:, :len(T_idxs) // 2], 1) * mask
+            qmask = qmask.scatter_(1, q_idx[:, :len(T_idxs) // 2], 1) * mask
             qmask = rearrange(qmask, 'b t c h w -> b t h w c').contiguous()
             kvmask = rearrange(kvmask, 'b t c h w -> b t h w c').contiguous()
 
             qmasks.append(qmask)
             kvmasks.append(kvmask)
 
+        b, t, c, h, w = input_feats.shape
 
-        
-        b,t,c,h,w = input_feats.shape
-        
-        trans_feats = self.softsplit(input_feats.view(b*t,c,h,w),n,self.fold_feat_size)
-        
+        trans_feats = self.softsplit(input_feats.view(b * t, c, h, w), n, self.fold_feat_size)
 
-        
+        trans_feats = self.transsqattn(trans_feats, self.fold_feat_size, qmasks, kvmasks)
 
-        trans_feats = self.transsqattn(trans_feats,self.fold_feat_size,qmasks,kvmasks)
+        trans_feats = self.softcomp(trans_feats, t, self.fold_feat_size)
 
-        
-        trans_feats = self.softcomp(trans_feats,t,self.fold_feat_size)
+        trans_feats = trans_feats.view(b, t, c, h, w)
+        trans_feats = self.cabattn(torch.cat([input_feats, trans_feats], 2)[0]).unsqueeze(0)
 
-        
-        trans_feats = trans_feats.view(b,t,c,h,w)
-        trans_feats = self.cabattn(torch.cat([input_feats,trans_feats],2)[0]).unsqueeze(0)
-        
         x = self.up21(trans_feats[0], self.skip_attn1(enc11))
         dec1 = self.decoder_level1(x)
         dec11 = self.decoder_level1_1(dec1, reverse=1)
-        
+
         dec11_out = self.conv_hr0(self.act(self.upsample0(dec11))) + self.skip_conv(shortcut)
         dec11_out = self.out_conv(dec11_out)
         dec11_out = self.last_conv(dec11_out)
         dec11_out = dec11_out.unsqueeze(0) + lqs
 
-        
         # reconstruction
         return dec11_out

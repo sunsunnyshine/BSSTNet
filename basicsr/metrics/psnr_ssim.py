@@ -42,7 +42,7 @@ def calculate_psnr(img, img2, crop_border, input_order='HWC', test_y_channel=Fal
     img = img.astype(np.float64)
     img2 = img2.astype(np.float64)
 
-    mse = np.mean((img - img2)**2)
+    mse = np.mean((img - img2) ** 2)
     if mse == 0:
         return float('inf')
     return 10. * np.log10(255. * 255. / mse)
@@ -77,8 +77,48 @@ def calculate_psnr_pt(img, img2, crop_border, test_y_channel=False, **kwargs):
     img = img.to(torch.float64)
     img2 = img2.to(torch.float64)
 
-    mse = torch.mean((img - img2)**2, dim=[1, 2, 3])
+    mse = torch.mean((img - img2) ** 2, dim=[1, 2, 3])
     return 10. * torch.log10(1. / (mse + 1e-8))
+
+
+@METRIC_REGISTRY.register()
+def calculate_weighted_psnr(img, img2, mask, crop_border, input_order='HWC', test_y_channel=False, **kwargs):
+    """Calculate Weighted PSNR (Peak Signal-to-Noise Ratio) (PyTorch version).
+
+        Reference: https://github.com/LeiaLi/ReLoBlur
+
+        Args:
+            img (Tensor): Images with range [0, 1], shape (n, 3/1, h, w).
+            img2 (Tensor): Images with range [0, 1], shape (n, 3/1, h, w).
+            mask (Tensor): Images with range [0, 1], shape (n, 1, h, w).
+            crop_border (int): Cropped pixels in each edge of an image. These pixels are not involved in the calculation.
+            test_y_channel (bool): Test on Y channel of YCbCr. Default: False.
+
+        Returns:
+            float: PSNR result.
+    """
+    assert img.shape == img2.shape, (f'Image shapes are different: {img.shape}, {img2.shape}.')
+    if input_order not in ['HWC', 'CHW']:
+        raise ValueError(f'Wrong input_order {input_order}. Supported input_orders are "HWC" and "CHW"')
+    img = reorder_image(img, input_order=input_order)
+    img2 = reorder_image(img2, input_order=input_order)
+
+    if crop_border != 0:
+        img = img[crop_border:-crop_border, crop_border:-crop_border, ...]
+        img2 = img2[crop_border:-crop_border, crop_border:-crop_border, ...]
+
+    if test_y_channel:
+        img = to_y_channel(img)
+        img2 = to_y_channel(img2)
+
+    img = img.astype(np.float64)
+    img2 = img2.astype(np.float64)
+    mask = mask.astype(np.float64)
+
+    mse = np.mean(mask * (img - img2) ** 2) / np.mean(mask)
+    if mse == 0:
+        return float('inf')
+    return 10. * np.log10(255. * 255. / mse)
 
 
 @METRIC_REGISTRY.register()
@@ -125,6 +165,30 @@ def calculate_ssim(img, img2, crop_border, input_order='HWC', test_y_channel=Fal
     ssims = []
     for i in range(img.shape[2]):
         ssims.append(_ssim(img[..., i], img2[..., i]))
+    return np.array(ssims).mean()
+
+
+def calculate_weighted_ssim(img, img2, mask, crop_border, input_order='HWC', test_y_channel=False, **kwargs):
+    assert img.shape == img2.shape, (f'Image shapes are different: {img.shape}, {img2.shape}.')
+    if input_order not in ['HWC', 'CHW']:
+        raise ValueError(f'Wrong input_order {input_order}. Supported input_orders are "HWC" and "CHW"')
+    img = reorder_image(img, input_order=input_order)
+    img2 = reorder_image(img2, input_order=input_order)
+
+    if crop_border != 0:
+        img = img[crop_border:-crop_border, crop_border:-crop_border, ...]
+        img2 = img2[crop_border:-crop_border, crop_border:-crop_border, ...]
+
+    if test_y_channel:
+        img = to_y_channel(img)
+        img2 = to_y_channel(img2)
+
+    img = img.astype(np.float64)
+    img2 = img2.astype(np.float64)
+
+    ssims = []
+    for i in range(img.shape[2]):
+        ssims.append(_ssim_weighted(img[..., i], img2[..., i], mask))
     return np.array(ssims).mean()
 
 
@@ -180,22 +244,53 @@ def _ssim(img, img2):
         float: SSIM result.
     """
 
-    c1 = (0.01 * 255)**2
-    c2 = (0.03 * 255)**2
+    c1 = (0.01 * 255) ** 2
+    c2 = (0.03 * 255) ** 2
     kernel = cv2.getGaussianKernel(11, 1.5)
     window = np.outer(kernel, kernel.transpose())
 
     mu1 = cv2.filter2D(img, -1, window)[5:-5, 5:-5]  # valid mode for window size 11
     mu2 = cv2.filter2D(img2, -1, window)[5:-5, 5:-5]
-    mu1_sq = mu1**2
-    mu2_sq = mu2**2
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
     mu1_mu2 = mu1 * mu2
-    sigma1_sq = cv2.filter2D(img**2, -1, window)[5:-5, 5:-5] - mu1_sq
-    sigma2_sq = cv2.filter2D(img2**2, -1, window)[5:-5, 5:-5] - mu2_sq
+    sigma1_sq = cv2.filter2D(img ** 2, -1, window)[5:-5, 5:-5] - mu1_sq
+    sigma2_sq = cv2.filter2D(img2 ** 2, -1, window)[5:-5, 5:-5] - mu2_sq
     sigma12 = cv2.filter2D(img * img2, -1, window)[5:-5, 5:-5] - mu1_mu2
 
     ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
     return ssim_map.mean()
+
+
+def _ssim_weighted(img, img2, mask):
+    """Calculate SSIM (structural similarity) for one channel images.
+
+    It is called by func:`calculate_ssim`.
+
+    Args:
+        img (ndarray): Images with range [0, 255] with order 'HWC'.
+        img2 (ndarray): Images with range [0, 255] with order 'HWC'.
+
+    Returns:
+        float: SSIM result.
+    """
+
+    c1 = (0.01 * 255) ** 2
+    c2 = (0.03 * 255) ** 2
+    kernel = cv2.getGaussianKernel(11, 1.5)
+    window = np.outer(kernel, kernel.transpose())
+
+    mu1 = cv2.filter2D(img, -1, window)[5:-5, 5:-5]  # valid mode for window size 11
+    mu2 = cv2.filter2D(img2, -1, window)[5:-5, 5:-5]
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
+    mu1_mu2 = mu1 * mu2
+    sigma1_sq = cv2.filter2D(img ** 2, -1, window)[5:-5, 5:-5] - mu1_sq
+    sigma2_sq = cv2.filter2D(img2 ** 2, -1, window)[5:-5, 5:-5] - mu2_sq
+    sigma12 = cv2.filter2D(img * img2, -1, window)[5:-5, 5:-5] - mu1_mu2
+
+    ssim_map = ((2 * mu1_mu2 + c1) * (2 * sigma12 + c2)) / ((mu1_sq + mu2_sq + c1) * (sigma1_sq + sigma2_sq + c2))
+    return (ssim_map * mask).mean() / mask.mean()
 
 
 def _ssim_pth(img, img2):
@@ -210,8 +305,8 @@ def _ssim_pth(img, img2):
     Returns:
         float: SSIM result.
     """
-    c1 = (0.01 * 255)**2
-    c2 = (0.03 * 255)**2
+    c1 = (0.01 * 255) ** 2
+    c2 = (0.03 * 255) ** 2
 
     kernel = cv2.getGaussianKernel(11, 1.5)
     window = np.outer(kernel, kernel.transpose())
@@ -231,7 +326,6 @@ def _ssim_pth(img, img2):
     return ssim_map.mean([1, 2, 3])
 
 
-
 # --------------------------------------------
 # SSIM
 # --------------------------------------------
@@ -241,13 +335,13 @@ def calculate_ssim_mat(img1, img2, border=0):
     the same outputs as MATLAB's
     img1, img2: [0, 255]
     '''
-    #img1 = img1.squeeze()
-    #img2 = img2.squeeze()
+    # img1 = img1.squeeze()
+    # img2 = img2.squeeze()
     if not img1.shape == img2.shape:
         raise ValueError('Input images must have the same dimensions.')
     h, w = img1.shape[:2]
-    img1 = img1[border:h-border, border:w-border]
-    img2 = img2[border:h-border, border:w-border]
+    img1 = img1[border:h - border, border:w - border]
+    img2 = img2[border:h - border, border:w - border]
 
     if img1.ndim == 2:
         return ssim(img1, img2)
@@ -255,7 +349,7 @@ def calculate_ssim_mat(img1, img2, border=0):
         if img1.shape[2] == 3:
             ssims = []
             for i in range(3):
-                ssims.append(ssim(img1[:,:,i], img2[:,:,i]))
+                ssims.append(ssim(img1[:, :, i], img2[:, :, i]))
             return np.array(ssims).mean()
         elif img1.shape[2] == 1:
             return ssim(np.squeeze(img1), np.squeeze(img2))
@@ -264,8 +358,8 @@ def calculate_ssim_mat(img1, img2, border=0):
 
 
 def ssim(img1, img2):
-    C1 = (0.01 * 255)**2
-    C2 = (0.03 * 255)**2
+    C1 = (0.01 * 255) ** 2
+    C2 = (0.03 * 255) ** 2
 
     img1 = img1.astype(np.float64)
     img2 = img2.astype(np.float64)
@@ -274,18 +368,21 @@ def ssim(img1, img2):
 
     mu1 = cv2.filter2D(img1, -1, window)[5:-5, 5:-5]  # valid
     mu2 = cv2.filter2D(img2, -1, window)[5:-5, 5:-5]
-    mu1_sq = mu1**2
-    mu2_sq = mu2**2
+    mu1_sq = mu1 ** 2
+    mu2_sq = mu2 ** 2
     mu1_mu2 = mu1 * mu2
-    sigma1_sq = cv2.filter2D(img1**2, -1, window)[5:-5, 5:-5] - mu1_sq
-    sigma2_sq = cv2.filter2D(img2**2, -1, window)[5:-5, 5:-5] - mu2_sq
+    sigma1_sq = cv2.filter2D(img1 ** 2, -1, window)[5:-5, 5:-5] - mu1_sq
+    sigma2_sq = cv2.filter2D(img2 ** 2, -1, window)[5:-5, 5:-5] - mu2_sq
     sigma12 = cv2.filter2D(img1 * img2, -1, window)[5:-5, 5:-5] - mu1_mu2
 
     ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) *
                                                             (sigma1_sq + sigma2_sq + C2))
     return ssim_map.mean()
 
+
 from scipy.ndimage import gaussian_filter
+
+
 @METRIC_REGISTRY.register()
 def ssim_calculate(img, img2, sd=1.5, C1=0.01**2, C2=0.03**2):
     # Processing input image
@@ -295,7 +392,6 @@ def ssim_calculate(img, img2, sd=1.5, C1=0.01**2, C2=0.03**2):
     # Processing gt image
     img2 = np.array(img2, dtype=np.float32) / 255
     img2 = img2.transpose((2, 0, 1))
-
 
     mu1 = gaussian_filter(img1, sd)
     mu2 = gaussian_filter(img2, sd)
@@ -314,4 +410,32 @@ def ssim_calculate(img, img2, sd=1.5, C1=0.01**2, C2=0.03**2):
     return np.mean(ssim_map)
 
 
+@METRIC_REGISTRY.register()
+def weighted_ssim_calculate(img, img2, mask, sd=1.5, C1=0.01 ** 2, C2=0.03 ** 2):
+    # Processing input image
+    img1 = np.array(img, dtype=np.float32) / 255
+    img1 = img1.transpose((2, 0, 1))
 
+    # Processing gt image
+    img2 = np.array(img2, dtype=np.float32) / 255
+    img2 = img2.transpose((2, 0, 1))
+
+    mask = np.array(mask, dtype=np.float32)
+    mask = mask.transpose((2, 0, 1))
+
+    mu1 = gaussian_filter(img1, sd)
+    mu2 = gaussian_filter(img2, sd)
+    mu1_sq = mu1 * mu1
+    mu2_sq = mu2 * mu2
+    mu1_mu2 = mu1 * mu2
+    sigma1_sq = gaussian_filter(img1 * img1, sd) - mu1_sq
+    sigma2_sq = gaussian_filter(img2 * img2, sd) - mu2_sq
+    sigma12 = gaussian_filter(img1 * img2, sd) - mu1_mu2
+
+    ssim_num = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2))
+
+    ssim_den = ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+
+    ssim_map = ssim_num / ssim_den
+
+    return np.mean(ssim_map * mask) / np.mean(mask)

@@ -289,8 +289,10 @@ class VideoDeblurTestDataset(data.Dataset):
         super(VideoDeblurTestDataset, self).__init__()
         self.opt = opt
         self.cache_data = opt['cache_data']
-        self.gt_root, self.lq_root = opt['dataroot_gt'], opt['dataroot_lq']
-        self.data_info = {'lq_path': [], 'gt_path': [], 'folder': [], 'idx': [], 'border': []}
+        self.gt_root, self.lq_root, self.pm_root, self.hm_root = opt['dataroot_gt'], opt['dataroot_lq'], opt[
+            'dataroot_pm'], opt['dataroot_hm']
+        self.data_info = {'lq_path': [], 'gt_path': [], 'pm_path': [], 'hm_path': [], 'folder': [], 'idx': [],
+                          'border': []}
         # file client (io backend)
         self.file_client = None
         self.io_backend_opt = opt['io_backend']
@@ -298,29 +300,37 @@ class VideoDeblurTestDataset(data.Dataset):
 
         logger = get_root_logger()
         logger.info(f'Generate data info for VideoTestDataset - {opt["name"]}')
-        self.imgs_lq, self.imgs_gt = {}, {}
+        self.imgs_lq, self.imgs_gt, self.imgs_pm, self.imgs_hm = {}, {}, {}, {}
         if 'meta_info_file' in opt:
             with open(opt['meta_info_file'], 'r') as fin:
                 subfolders = [line.split(' ')[0] for line in fin]
                 subfolders_lq = [osp.join(self.lq_root, key) for key in subfolders]
                 subfolders_gt = [osp.join(self.gt_root, key) for key in subfolders]
+                subfolders_pm = [osp.join(self.pm_root, key) for key in subfolders]
+                subfolders_hm = [osp.join(self.hm_root, key) for key in subfolders]
         else:
             subfolders_lq = sorted(glob.glob(osp.join(self.lq_root, '*')))
             subfolders_gt = sorted(glob.glob(osp.join(self.gt_root, '*')))
+            subfolders_pm = sorted(glob.glob(osp.join(self.pm_root, '*')))
+            subfolders_hm = sorted(glob.glob(osp.join(self.hm_root, '*')))
 
-        if opt['name'].lower() in ['vid4', 'reds4', 'redsofficial','dvd','gopro']:
-            for subfolder_lq, subfolder_gt in zip(subfolders_lq, subfolders_gt):
+        if opt['name'].lower() in ['vid4', 'reds4', 'redsofficial', 'dvd', 'gopro', 'vdv']:
+            for subfolder_lq, subfolder_gt, subfolder_pm, subfolder_hm in zip(subfolders_lq, subfolders_gt,
+                                                                              subfolders_pm, subfolders_hm):
                 # get frame list for lq and gt
                 subfolder_name = osp.basename(subfolder_lq)
                 img_paths_lq = sorted(list(scandir(subfolder_lq, full_path=True)))
                 img_paths_gt = sorted(list(scandir(subfolder_gt, full_path=True)))
-
+                img_paths_pm = sorted(list(scandir(subfolder_pm, full_path=True)))
+                img_paths_hm = sorted(list(scandir(subfolder_hm, full_path=True)))
                 max_idx = len(img_paths_lq)
                 assert max_idx == len(img_paths_gt), (f'Different number of images in lq ({max_idx})'
                                                       f' and gt folders ({len(img_paths_gt)})')
 
                 self.data_info['lq_path'].extend(img_paths_lq)
                 self.data_info['gt_path'].extend(img_paths_gt)
+                self.data_info['pm_path'].extend(img_paths_pm)
+                self.data_info['hm_path'].extend(img_paths_hm)
                 self.data_info['folder'].extend([subfolder_name] * max_idx)
                 for i in range(max_idx):
                     self.data_info['idx'].append(f'{i}/{max_idx}')
@@ -336,9 +346,13 @@ class VideoDeblurTestDataset(data.Dataset):
                     # print(img_paths_lq)
                     self.imgs_lq[subfolder_name] = read_img_seq(img_paths_lq)
                     self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
+                    self.imgs_pm[subfolder_name] = read_img_seq(img_paths_pm)
+                    self.imgs_hm[subfolder_name] = read_img_seq(img_paths_hm)
                 else:
                     self.imgs_lq[subfolder_name] = img_paths_lq
                     self.imgs_gt[subfolder_name] = img_paths_gt
+                    self.imgs_pm[subfolder_name] = img_paths_pm
+                    self.imgs_hm[subfolder_name] = img_paths_hm
         else:
             raise ValueError(f'Non-supported video test dataset: {type(opt["name"])}')
 
@@ -373,8 +387,6 @@ class VideoDeblurTestDataset(data.Dataset):
         return len(self.data_info['gt_path'])
 
 
-
-
 @DATASET_REGISTRY.register()
 class VideoRecurrentTestDataset(VideoDeblurTestDataset):
     """Video test dataset for recurrent architectures, which takes LR video
@@ -391,13 +403,14 @@ class VideoRecurrentTestDataset(VideoDeblurTestDataset):
         super(VideoRecurrentTestDataset, self).__init__(opt)
         # Find unique folder strings
         self.folders = sorted(list(set(self.data_info['folder'])))
-        
+
     def __getitem__(self, index):
         folder = self.folders[index]
 
         if self.cache_data:
             imgs_lq = self.imgs_lq[folder]
             imgs_gt = self.imgs_gt[folder]
+            imgs_pm = self.imgs_pm[folder]
         else:
             # raise NotImplementedError('Without cache_data is not implemented.')
             """ if len(self.imgs_lq[folder]) > 100:
@@ -409,7 +422,6 @@ class VideoRecurrentTestDataset(VideoDeblurTestDataset):
 
             imgs_lq = read_img_seq(self.imgs_lq[folder])
             imgs_gt = read_img_seq(self.imgs_gt[folder])
-            
 
         return {
             'lq': imgs_lq,
@@ -445,59 +457,65 @@ class VideoRecurrentTestDatasetlocal(VideoDeblurTestDataset):
         self.seq_names = []
         if opt['num_frame'] != -1:
             for folder in self.folders:
-                
+
                 d = len(self.imgs_gt[folder])
-                
+
                 if d < num_frame_testing:
                     selected_index = [
-                        i for i in range(0,d)
+                        i for i in range(0, d)
                     ]
 
                     self.splite_seqs_index[f"{folder}_{d_index}"] = {
-                        "seq_index" : selected_index,
-                        "seq_from_folder" : folder
+                        "seq_index": selected_index,
+                        "seq_from_folder": folder
                     }
                     self.seq_names += [f"{folder}_{d_index}"]
                 else:
-                    d_idx_list = list(range(0, d-num_frame_testing, stride)) + [max(0,d-num_frame_testing)]
+                    d_idx_list = list(range(0, d - num_frame_testing, stride)) + [max(0, d - num_frame_testing)]
                     for d_index in d_idx_list:
                         selected_index = [
-                            i for i in range(d_index,d_index+num_frame_testing)
+                            i for i in range(d_index, d_index + num_frame_testing)
                         ]
                         self.splite_seqs_index[f"{folder}_{d_index}"] = {
-                            "seq_index" : selected_index,
-                            "seq_from_folder" : folder
+                            "seq_index": selected_index,
+                            "seq_from_folder": folder
                         }
                         self.seq_names += [f"{folder}_{d_index}"]
-                
-                
-                
-                    
 
         else:
             self.seq_names = self.folders
             for folder in self.folders:
                 d = len(self.imgs_gt[folder])
                 self.splite_seqs_index[folder] = {
-                    "seq_index" : list(range(0,d)),
-                    "seq_from_folder" : folder
+                    "seq_index": list(range(0, d)),
+                    "seq_from_folder": folder
                 }
 
     def __getitem__(self, index):
         # folder = self.folders[index]
         seq_name = self.seq_names[index]
-        
-        selected_index,folder = self.splite_seqs_index[seq_name]["seq_index"],self.splite_seqs_index[seq_name]["seq_from_folder"]
-        lq_paths = [ self.imgs_lq[folder][p] for p in selected_index]
-        gt_paths = [ self.imgs_gt[folder][p] for p in selected_index]
+
+        selected_index, folder = self.splite_seqs_index[seq_name]["seq_index"], self.splite_seqs_index[seq_name][
+            "seq_from_folder"]
+        lq_paths = [self.imgs_lq[folder][p] for p in selected_index]
+        gt_paths = [self.imgs_gt[folder][p] for p in selected_index]
+        pm_paths = [self.imgs_pm[folder][p] for p in selected_index]
+        hm_paths = [self.imgs_hm[folder][p] for p in selected_index]
 
         imgs_lq = read_img_seq(lq_paths)
         imgs_gt = read_img_seq(gt_paths)
-        
+        imgs_pm = read_img_seq(pm_paths)
+        imgs_hm = read_img_seq(hm_paths)
+
+        ## resize the imgs_hm to the same size as imgs_gt，because our hardmask is generated from demo.
+        H, W = imgs_gt.shape[2], imgs_gt.shape[3]
+        imgs_hm = torch.nn.functional.interpolate(imgs_hm, size=(H, W), mode='bilinear', align_corners=False)
 
         return {
             'lq': imgs_lq,
             'gt': imgs_gt,
+            'pm': imgs_pm,
+            'hm': imgs_hm,
             'folder': folder,
             'seq_name': seq_name,
             'seq': selected_index
@@ -505,5 +523,3 @@ class VideoRecurrentTestDatasetlocal(VideoDeblurTestDataset):
 
     def __len__(self):
         return len(self.seq_names)
-
-

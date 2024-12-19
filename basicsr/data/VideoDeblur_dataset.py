@@ -4,10 +4,11 @@ import torch
 from pathlib import Path
 from torch.utils import data as data
 
-from basicsr.data.transforms import augment, paired_random_crop
+from basicsr.data.transforms import augment, paired_random_crop, paired_random_crop_target_aware
 from basicsr.utils import FileClient, get_root_logger, imfrombytes, img2tensor
 from basicsr.utils.flow_util import dequantize_flow
 from basicsr.utils.registry import DATASET_REGISTRY
+
 
 @DATASET_REGISTRY.register()
 class DeblurRecurrentDataset(data.Dataset):
@@ -52,7 +53,9 @@ class DeblurRecurrentDataset(data.Dataset):
     def __init__(self, opt):
         super(DeblurRecurrentDataset, self).__init__()
         self.opt = opt
-        self.gt_root, self.lq_root = Path(opt['dataroot_gt']), Path(opt['dataroot_lq'])
+        self.gt_root, self.lq_root, self.pm_root, self.hm_root = Path(opt['dataroot_gt']), Path(
+            opt['dataroot_lq']), Path(
+            opt['dataroot_pm']), Path(opt['dataroot_hm'])
         self.num_frame = opt['num_frame']
         self.file_end = opt["file_end"]
         self.cache_data = opt["cache_data"]
@@ -70,21 +73,6 @@ class DeblurRecurrentDataset(data.Dataset):
                         sequence_length=int(frame_num)
                     )
                 )
-
-
-        # remove the video clips used in validation
-        """ if opt['val_partition'] == 'REDS4':
-            val_partition = ['000', '011', '015', '020']
-        elif opt['val_partition'] == 'official':
-            val_partition = [f'{v:03d}' for v in range(240, 270)]
-        else:
-            raise ValueError(f'Wrong validation partition {opt["val_partition"]}.'
-                             f"Supported ones are ['official', 'REDS4'].")
-        if opt['test_mode']:
-            self.keys = [v for v in self.keys if v.split('/')[0] in val_partition]
-        else:
-            self.keys = [v for v in self.keys if v.split('/')[0] not in val_partition] """
-
         # file client (io backend)
         self.file_client = None
 
@@ -93,11 +81,11 @@ class DeblurRecurrentDataset(data.Dataset):
         if self.io_backend_opt['type'] == 'lmdb':
             self.is_lmdb = True
             if hasattr(self, 'flow_root') and self.flow_root is not None:
-                self.io_backend_opt['db_paths'] = [self.lq_root, self.gt_root, self.flow_root]
-                self.io_backend_opt['client_keys'] = ['lq', 'gt', 'flow']
+                self.io_backend_opt['db_paths'] = [self.lq_root, self.gt_root, self.pm_root, self.flow_root]
+                self.io_backend_opt['client_keys'] = ['lq', 'gt', 'pm', 'hm', 'flow']
             else:
-                self.io_backend_opt['db_paths'] = [self.lq_root, self.gt_root]
-                self.io_backend_opt['client_keys'] = ['lq', 'gt']
+                self.io_backend_opt['db_paths'] = [self.lq_root, self.gt_root, self.pm_root]
+                self.io_backend_opt['client_keys'] = ['lq', 'gt', 'hm', 'pm']
 
         # temporal augmentation configs
         self.interval_list = opt.get('interval_list', [1])
@@ -107,6 +95,9 @@ class DeblurRecurrentDataset(data.Dataset):
         logger.info(f'Temporal augmentation interval list: [{interval_str}]; '
                     f'random reverse is {self.random_reverse}.')
 
+        # Blur-aware patch cropping
+        self.force_blur_region_p = opt.get('force_blur_region_p', 0.5)
+
     def __getitem__(self, index):
         if self.file_client is None:
             self.file_client = FileClient(self.io_backend_opt.pop('type'), **self.io_backend_opt)
@@ -114,11 +105,10 @@ class DeblurRecurrentDataset(data.Dataset):
         scale = self.opt['scale'] if self.opt['scale'] is not None else 1
         gt_size = self.opt['gt_size']
         # key = self.keys[index]
-        index = index%len(self.data_infos)
+        index = index % self.data_infos.__len__()
         clip_name = self.data_infos[index]["folder"]
         max_frame = self.data_infos[index]['sequence_length']
 
-        
         # clip_name, frame_name = key.split('/')  # key example: 000/00000000
         # max_frame = self.max_frames[clip_name]
         # print(max_frame)
@@ -128,10 +118,10 @@ class DeblurRecurrentDataset(data.Dataset):
         # ensure not exceeding the borders
         # start_frame_idx = int(frame_name)
         # if start_frame_idx > max_frame - self.num_frame * interval:
-            # start_frame_idx = random.randint(0, max_frame - self.num_frame * interval)
-        
+        # start_frame_idx = random.randint(0, max_frame - self.num_frame * interval)
+
         start_frame_idx = np.random.randint(0, max_frame - self.num_frame * interval + 1)
-        end_frame_idx = start_frame_idx + self.num_frame * interval
+        end_frame_idx = min(start_frame_idx + self.num_frame * interval, max_frame)
         neighbor_list = list(range(start_frame_idx, end_frame_idx, interval))
 
         # random reverse
@@ -141,13 +131,19 @@ class DeblurRecurrentDataset(data.Dataset):
         # get the neighboring LQ and GT frames
         img_lqs = []
         img_gts = []
+        img_pms = []
+        img_hms = []
         for neighbor in neighbor_list:
             if self.is_lmdb:
                 img_lq_path = f'{clip_name}/{neighbor:05d}'
                 img_gt_path = f'{clip_name}/{neighbor:05d}'
+                img_pm_path = f'{clip_name}/{neighbor:05d}'
+                img_hm_path = f'{clip_name}/{neighbor:05d}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:05d}.{self.file_end}'
                 img_gt_path = self.gt_root / clip_name / f'{neighbor:05d}.{self.file_end}'
+                img_pm_path = self.pm_root / clip_name / f'{neighbor:05d}.{self.file_end}'
+                img_hm_path = self.hm_root / clip_name / f'{neighbor:05d}.jpg'
 
             # get LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
@@ -159,25 +155,42 @@ class DeblurRecurrentDataset(data.Dataset):
             img_gt = imfrombytes(img_bytes, float32=True)
             img_gts.append(img_gt)
 
+            # get PM
+            img_bytes = self.file_client.get(img_pm_path, 'pm')
+            img_pm = imfrombytes(img_bytes, float32=True)
+            img_pms.append(img_pm)
+
+            # get HM
+            img_bytes = self.file_client.get(img_hm_path, 'hm')
+            img_hm = imfrombytes(img_bytes, float32=True)
+            img_hms.append(img_hm)
+
         # randomly crop
-        img_gts, img_lqs = paired_random_crop(img_gts, img_lqs, gt_size, scale, img_gt_path)
+        img_gts, img_lqs, img_pms, img_hms = paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_size, scale,
+                                                                    self.force_blur_region_p, img_gt_path)
 
         # augmentation - flip, rotate
+        len = img_gts.__len__()
         img_lqs.extend(img_gts)
+        img_lqs.extend(img_pms)
+        img_lqs.extend(img_hms)
         img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
 
         img_results = img2tensor(img_results)
-        img_gts = torch.stack(img_results[len(img_lqs) // 2:], dim=0)
-        img_lqs = torch.stack(img_results[:len(img_lqs) // 2], dim=0)
+        img_gts = torch.stack(img_results[:len], dim=0)
+        img_lqs = torch.stack(img_results[len:2 * len], dim=0)
+        img_pms = torch.stack(img_results[2 * len:3*len], dim=0)
+        img_hms = torch.stack(img_results[3 * len:], dim=0)
 
         # img_lqs: (t, c, h, w)
         # img_gts: (t, c, h, w)
         # key: str
         # return {'lq': img_lqs, 'gt': img_gts, 'key': key}
-        return {'lq': img_lqs, 'gt': img_gts, 'folder': [f"{clip_name}.{neighbor_list[0]}",f"{clip_name}.{neighbor_list[1]}"]}
+        return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms,'hm': img_hms,
+                'folder': [f"{clip_name}.{neighbor_list[0]}", f"{clip_name}.{neighbor_list[1]}"]}
 
     def __len__(self):
-        return len(self.data_infos)*10000
+        return len(self.data_infos) * 10000
 
 
 @DATASET_REGISTRY.register()
@@ -221,12 +234,12 @@ class DeblurRecurrentDatasetloadmemory(data.Dataset):
     """
 
     def __init__(self, opt):
-        super( DeblurRecurrentDatasetloadmemory, self).__init__()
+        super(DeblurRecurrentDatasetloadmemory, self).__init__()
         self.opt = opt
         self.gt_root, self.lq_root = Path(opt['dataroot_gt']), Path(opt['dataroot_lq'])
         self.num_frame = opt['num_frame']
         self.file_end = opt["file_end"]
-        
+
         self.keys = []
         self.max_frames = {}
         self.data_infos = []
@@ -241,11 +254,6 @@ class DeblurRecurrentDatasetloadmemory(data.Dataset):
                         sequence_length=int(frame_num)
                     )
                 )
-        
-        
-        
-            
-
 
         # remove the video clips used in validation
         """ if opt['val_partition'] == 'REDS4':
@@ -312,7 +320,6 @@ class DeblurRecurrentDatasetloadmemory(data.Dataset):
         clip_name = self.data_infos[index]["folder"]
         max_frame = self.data_infos[index]['sequence_length']
 
-        
         # clip_name, frame_name = key.split('/')  # key example: 000/00000000
         # max_frame = self.max_frames[clip_name]
         # print(max_frame)
@@ -322,8 +329,8 @@ class DeblurRecurrentDatasetloadmemory(data.Dataset):
         # ensure not exceeding the borders
         # start_frame_idx = int(frame_name)
         # if start_frame_idx > max_frame - self.num_frame * interval:
-            # start_frame_idx = random.randint(0, max_frame - self.num_frame * interval)
-        
+        # start_frame_idx = random.randint(0, max_frame - self.num_frame * interval)
+
         start_frame_idx = np.random.randint(0, max_frame - self.num_frame * interval + 1)
         end_frame_idx = start_frame_idx + self.num_frame * interval
         neighbor_list = list(range(start_frame_idx, end_frame_idx, interval))
@@ -346,11 +353,9 @@ class DeblurRecurrentDatasetloadmemory(data.Dataset):
 
             # get LQ
             img_lqs = self.lq_cache_images[clip_name][neighbor_list]
-            
 
             # get GT
             img_gts = self.gt_cache_images[clip_name][neighbor_list]
-
 
         # randomly crop
         img_gts, img_lqs = paired_random_crop(img_gts, img_lqs, gt_size, scale, img_gt_path)
@@ -367,7 +372,8 @@ class DeblurRecurrentDatasetloadmemory(data.Dataset):
         # img_gts: (t, c, h, w)
         # key: str
         # return {'lq': img_lqs, 'gt': img_gts, 'key': key}
-        return {'lq': img_lqs, 'gt': img_gts, 'folder': [f"{clip_name}.{neighbor_list[0]}",f"{clip_name}.{neighbor_list[1]}"]}
+        return {'lq': img_lqs, 'gt': img_gts,
+                'folder': [f"{clip_name}.{neighbor_list[0]}", f"{clip_name}.{neighbor_list[1]}"]}
 
     def __len__(self):
         return len(self.data_infos)

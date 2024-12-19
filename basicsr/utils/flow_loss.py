@@ -3,8 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torchvision.models as models
 import numpy as np
+from torch.autograd import Variable
+
+
 # from .fbConsistencyCheck import image_warp
 # from basicsr.archs.arch_util import flow_warp
+def l1_loss(pred, target):
+    return F.l1_loss(pred, target, reduction='none')
+
 
 def TernaryLoss(im, im_warp, max_distance=1):
     patch_size = 2 * max_distance + 1
@@ -45,8 +51,6 @@ def TernaryLoss(im, im_warp, max_distance=1):
     return dist * mask
 
 
-
-
 def image_warp(image, flow):
     '''
     image: 上一帧的图片,torch.Size([1, 3, 256, 256])
@@ -69,35 +73,36 @@ def image_warp(image, flow):
 
 
 class FlowWarpingLoss(nn.Module):
-    def __init__(self, metric):
+    def __init__(self, metric=nn.L1Loss(reduction='none')):
         super(FlowWarpingLoss, self).__init__()
         self.metric = metric
 
-    def warp(self, x, flow):
+    def warp(self, x, flo):
         """
-
-        Args:
-            x: torch tensor with shape [b, c, h, w], the x can be 3 (for rgb frame) or 2 (for optical flow)
-            flow: torch tensor with shape [b, 2, h, w]
-
-        Returns: the warped x (can be an image or an optical flow)
-
+        warp an image/tensor (im2) back to im1, according to the optical flow
+            x: [B, C, H, W] (im2)
+            flo: [B, 2, H, W] flow
         """
-        h, w = x.shape[2:]
-        device = x.device
-        # normalize the flow to [-1~1]
-        flow = torch.cat([flow[:, 0:1, :, :] / ((w - 1) / 2), flow[:, 1:2, :, :] / ((h - 1) / 2)], dim=1)
-        flow = flow.permute(0, 2, 3, 1)  # change to [b, h, w, c]
-        # generate meshgrid
-        x_idx = np.linspace(-1, 1, w)
-        y_idx = np.linspace(-1, 1, h)
-        X_idx, Y_idx = np.meshgrid(x_idx, y_idx)
-        grid = torch.cat((torch.from_numpy(X_idx.astype('float32')).unsqueeze(0).unsqueeze(3),
-                          torch.from_numpy(Y_idx.astype('float32')).unsqueeze(0).unsqueeze(3)), 3).to(device)
-        output = torch.nn.functional.grid_sample(x, grid + flow, mode='bilinear', padding_mode='zeros')
+        B, C, H, W = x.size()
+        # mesh grid
+        xx = torch.arange(0, W).view(1, -1).repeat(H, 1)
+        yy = torch.arange(0, H).view(-1, 1).repeat(1, W)
+        xx = xx.view(1, 1, H, W).repeat(B, 1, 1, 1)
+        yy = yy.view(1, 1, H, W).repeat(B, 1, 1, 1)
+        grid = torch.cat((xx, yy), 1).float()
+        grid = grid.to(x.device)
+        vgrid = Variable(grid) + flo
+
+        # scale grid to [-1,1]
+        vgrid[:, 0, :, :] = 2.0 * vgrid[:, 0, :, :].clone() / max(W - 1, 1) - 1.0
+        vgrid[:, 1, :, :] = 2.0 * vgrid[:, 1, :, :].clone() / max(H - 1, 1) - 1.0
+
+        vgrid = vgrid.permute(0, 2, 3, 1)
+        output = nn.functional.grid_sample(x, vgrid, padding_mode='border')
+
         return output
 
-    def __call__(self, x, y, flow, mask):
+    def __call__(self, x, y, flow, mask=None):
         """
         image/flow warping, only support the single image/flow warping
         Args:
@@ -109,9 +114,20 @@ class FlowWarpingLoss(nn.Module):
         Returns: the warped image/optical flow
 
         """
+        # resized to flow size
+        scale_height = flow.size(2)/x.size(2)
+        scale_width = flow.size(3)/x.size(3)
+        # rescale the flow
+        flow[:, 0, :, :] *= scale_height
+        flow[:, 1, :, :] *= scale_width
+        x = F.interpolate(x, scale_factor=(scale_height, scale_width), mode='bilinear', align_corners=False)
+        y = F.interpolate(y, scale_factor=(scale_height, scale_width), mode='bilinear', align_corners=False)
         warped_x = self.warp(x, flow)
-        loss = self.metric(warped_x * mask, y * mask)
-        return loss
+        if mask is None:
+            loss = self.metric(warped_x, y)
+        else:
+            loss = self.metric(warped_x * mask, y * mask)
+        return torch.sum(loss, dim=1, keepdim=True)
 
 
 class TVLoss():
@@ -374,9 +390,9 @@ class VGG19(torch.nn.Module):
 
 # Some losses related to optical flows
 # From Unflow: https://github.com/simonmeister/UnFlow
-def FlowLoss(forward_flow, backward_flow, forward_gt_flow, backward_gt_flow, 
-              image_warp_loss_weight=1,fb_weight=0.1,census_loss_weight=0.25,
-              sm1_weight = 0.1, sm2_weight = 0.1,first_image=None, second_image=None):
+def FlowLoss(forward_flow, backward_flow, forward_gt_flow, backward_gt_flow,
+             image_warp_loss_weight=1, fb_weight=0.1, census_loss_weight=0.25,
+             sm1_weight=0.1, sm2_weight=0.1, first_image=None, second_image=None):
     """
     calculate the forward-backward consistency loss and the related image warp loss
     Args:
@@ -423,7 +439,6 @@ def FlowLoss(forward_flow, backward_flow, forward_gt_flow, backward_gt_flow,
     occ_fw = 1 - mask_fw
     occ_bw = 1 - mask_bw
 
-    
     # warp images
     second_image_warped = image_warp(second_image, backward_flow)  # frame 2 -> 1
     first_image_warped = image_warp(first_image, forward_flow)  # frame 1 -> 2
@@ -431,33 +446,27 @@ def FlowLoss(forward_flow, backward_flow, forward_gt_flow, backward_gt_flow,
     im_diff_bw = second_image - first_image_warped
     # calculate the image warp loss based on the occlusion regions calculated by forward and backward flows (gt)
     # occ_loss = occ_weight * (charbonnier_loss(occ_fw) + charbonnier_loss(occ_bw))
-    image_warp_loss = image_warp_loss_weight * (charbonnier_loss(im_diff_fw, mask_fw) + charbonnier_loss(im_diff_bw, mask_bw)) 
-    fb_loss = fb_weight * (charbonnier_loss(flow_diff_fw, mask_fw) + charbonnier_loss(flow_diff_bw, mask_bw)) 
-    
-    census_loss_second2first = TernaryLoss(second_image*mask_bw,first_image_warped*mask_bw).sum()/ (mask_bw.sum()+0.001)
-    census_loss_first2second = TernaryLoss(first_image*mask_fw,second_image_warped*mask_fw).sum()/ (mask_fw.sum()+0.001)
-    census_loss = census_loss_weight*(census_loss_second2first + census_loss_first2second)
-        
+    image_warp_loss = image_warp_loss_weight * (
+            charbonnier_loss(im_diff_fw, mask_fw) + charbonnier_loss(im_diff_bw, mask_bw))
+    fb_loss = fb_weight * (charbonnier_loss(flow_diff_fw, mask_fw) + charbonnier_loss(flow_diff_bw, mask_bw))
 
-    
-    
+    census_loss_second2first = TernaryLoss(second_image * mask_bw, first_image_warped * mask_bw).sum() / (
+            mask_bw.sum() + 0.001)
+    census_loss_first2second = TernaryLoss(first_image * mask_fw, second_image_warped * mask_fw).sum() / (
+            mask_fw.sum() + 0.001)
+    census_loss = census_loss_weight * (census_loss_second2first + census_loss_first2second)
+
     sm1_forward = smoothness_loss(forward_flow)
     sm1_backward = smoothness_loss(backward_flow)
-    sm1_loss = sm1_weight*(sm1_forward + sm1_backward)
-
+    sm1_loss = sm1_weight * (sm1_forward + sm1_backward)
 
     sm2_forward = second_order_loss(forward_flow)
     sm2_backward = second_order_loss(backward_flow)
-    sm2_loss = sm2_weight*(sm2_forward + sm2_backward)
-    
+    sm2_loss = sm2_weight * (sm2_forward + sm2_backward)
+
     loss = image_warp_loss + census_loss + sm1_loss + sm2_loss + fb_loss
-    
-    
-    
-    return loss,image_warp_loss,fb_loss,census_loss,sm1_loss,sm2_loss
 
-
-
+    return loss, image_warp_loss, fb_loss, census_loss, sm1_loss, sm2_loss
 
 
 def length_sq(x):
@@ -519,8 +528,6 @@ def charbonnier_loss(x, mask=None, truncate=None, alpha=0.45, beta=1.0, epsilon=
         return torch.sum(error) / (mask.sum() + epsilon)
     else:
         return torch.sum(error) / norm
-    
-    
 
 
 def second_order_deltas(flow):
@@ -596,7 +603,7 @@ def create_outgoing_mask(flow):
     grid_y = grid_y.to(flow.device)
 
     # flow_u, flow_v = torch.split(flow, split_size_or_sections=1, dim=1)  # [b, h, w]
-    flow_u,flow_v = flow[:,0,...], flow[:,1,...]
+    flow_u, flow_v = flow[:, 0, ...], flow[:, 1, ...]
     pos_x = grid_x + flow_u
     pos_y = grid_y + flow_v
     inside_x = torch.logical_and(pos_x <= (w - 1), pos_x >= 0)
@@ -607,11 +614,12 @@ def create_outgoing_mask(flow):
     return inside
 
 
-
-from basicsr.archs.spynet_arch import SpyNet
 from basicsr.archs.RAFT.raft import RAFT
+
+
 class FlowdeblurLoss(nn.Module):
     """Flow completion loss"""
+
     def __init__(self):
         super().__init__()
         # self.fix_spynet = SpyNet(load_path="/home/hczhang/CODE/AAAI/experiments/pretrained_models/flownet/spynet_sintel_final-3d2a1287.pth")
@@ -619,14 +627,12 @@ class FlowdeblurLoss(nn.Module):
         self.fix_spynet.eval()
         for p in self.fix_spynet.parameters():
             p.requires_grad = False
-        
 
         self.l1_criterion = nn.L1Loss()
-        
 
-    def forward(self, pre_flow_forwards,pre_flow_backwards, gt_local_frames,scale=1,returngtflow=False):
+    def forward(self, pre_flow_forwards, pre_flow_backwards, gt_local_frames, scale=1, returngtflow=False):
         b, l_t, c, h, w = gt_local_frames.size()
-        
+
         with torch.no_grad():
             # compute gt forward and backward flows
             gt_local_frames = F.interpolate(gt_local_frames.view(-1, c, h, w),
@@ -634,7 +640,7 @@ class FlowdeblurLoss(nn.Module):
                                             mode='bilinear',
                                             align_corners=True,
                                             recompute_scale_factor=True)
-            gt_local_frames = gt_local_frames.view(b, l_t, c, h //scale, w // scale)
+            gt_local_frames = gt_local_frames.view(b, l_t, c, h // scale, w // scale)
             gtlf_1 = gt_local_frames[:, :-1, :, :, :].reshape(
                 -1, c, h // scale, w // scale)
             gtlf_2 = gt_local_frames[:, 1:, :, :, :].reshape(
@@ -649,8 +655,5 @@ class FlowdeblurLoss(nn.Module):
             pre_flow_backwards.view(-1, 2, h // scale, w // scale), gt_flows_backward)
         flow_loss = forward_flow_loss + backward_flow_loss
         if returngtflow:
-            return flow_loss,gt_flows_forward,gt_flows_backward
+            return flow_loss, gt_flows_forward, gt_flows_backward
         return flow_loss
-
-
-

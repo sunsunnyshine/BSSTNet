@@ -133,7 +133,7 @@ def train_pipeline(root_path):
     logger.info(get_env_info())
     logger.info(dict2str(opt))
     # initialize wandb and tb loggers
-    tb_logger,wandb_logger = init_tb_loggers(opt)
+    tb_logger, wandb_logger = init_tb_loggers(opt)
 
     # create train and validation dataloaders
     result = create_train_val_dataloader(opt, logger)
@@ -173,13 +173,13 @@ def train_pipeline(root_path):
     logger.info(f'Start training from epoch: {start_epoch}, iter: {current_iter}')
     data_timer, iter_timer = AvgTimer(), AvgTimer()
     start_time = time.time()
-    if True:
-        if len(val_loaders) > 1:
-            logger.warning('Multiple validation datasets are *only* supported by SRModel.')
-        for val_loader in val_loaders:
+    # if True:
+    #     if len(val_loaders) > 1:
+    #         logger.warning('Multiple validation datasets are *only* supported by SRModel.')
+    #     for val_loader in val_loaders:
+    #
+    #         model.validation(val_loader, current_iter, tb_logger,wandb_logger, opt['val']['save_img'])
 
-            model.validation(val_loader, current_iter, tb_logger,wandb_logger, opt['val']['save_img'])
-        
         
     
     for epoch in range(start_epoch, total_epochs + 1):
@@ -249,7 +249,7 @@ def train_pipeline(root_path):
                 # msg_logger.log_video_images({"video":out_dict['masks'][0],"clip_name":"masks","iter":current_iter})
                 # msg_logger.log_video_images({"video":out_dict['show_motion_s'][0],"clip_name":"show_motion_s","iter":current_iter})
                 # msg_logger.log_video_images({"video":out_dict['show_motion_st'][0],"clip_name":"show_motion_st","iter":current_iter})
-                
+
 
             
             """ if (current_iter -1) % 20 == 0:
@@ -268,11 +268,11 @@ def train_pipeline(root_path):
                     msg_logger.log_image_video( seqs_log) """
 
             # save images
-            """ if current_iter % (opt['logger']['show_tf_imgs_freq']) == 0:
+            if current_iter % (opt['logger']['show_tf_imgs_freq']) == 0:
                 visual_imgs = model.get_current_visuals()
                 if tb_logger:
-                    for k, v in visual_imgs.items(): 
-                        tb_logger.add_images(f'ckpt_imgs/{k}', v.clamp(0, 1), current_iter) """
+                    for k, v in visual_imgs.items():
+                        tb_logger.add_images(f'ckpt_imgs/{k}', v.float().clamp(0, 1), current_iter)
 
             # save models and training states
             if current_iter % opt['logger']['save_checkpoint_freq'] == 0:
