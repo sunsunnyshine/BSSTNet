@@ -107,7 +107,7 @@ class ModelBSST(BaseModel):
             self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
             self.log_dict['l_pix'] = AverageMeter()
             self.log_dict['l_pix_weighted'] = AverageMeter()
-            self.log_dict['l_flows'] = AverageMeter()
+            # self.log_dict['l_flows'] = AverageMeter()
         else:
             self.cri_pix = None
 
