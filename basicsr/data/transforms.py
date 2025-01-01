@@ -35,8 +35,11 @@ def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch
     if not isinstance(img_hms, list):
         img_hms = [img_hms]
 
-    # resize the img_hms to the same size as img_pms. Because our hardmask is generated from demo ,so its size is different from the img_pms [720,1080],cv2
-    img_hms = [cv2.resize(v, (img_pms[0].shape[1], img_pms[0].shape[0])) for v in img_hms]
+    # resize the images,gts,pms to the same size with hms [720,1280]
+    img_gts = [cv2.resize(v, (img_hms[0].shape[1], img_hms[0].shape[0])) for v in img_gts]
+    img_lqs = [cv2.resize(v, (img_hms[0].shape[1], img_hms[0].shape[0])) for v in img_lqs]
+    img_pms = [cv2.resize(v, (img_hms[0].shape[1], img_hms[0].shape[0])) for v in img_pms]
+
 
     # determine input type: Numpy array or Tensor
     input_type = 'Tensor' if torch.is_tensor(img_gts[0]) else 'Numpy'
@@ -68,8 +71,8 @@ def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch
     # whether to use the Blur-Aware Patch Cropping Strategy
     force_blur_region = force_blur_region_p > 0 and random.random() < force_blur_region_p
     if force_blur_region:
-        ps_aware = torch.from_numpy(sum(img_pms))
-        R_blur = ps_aware.sum() / (np.prod(img_pms[0].shape) * img_pms.__len__())
+        ps_aware = torch.from_numpy(sum(img_hms))
+        R_blur = ps_aware.sum() / (np.prod(img_hms[0].shape) * img_hms.__len__())
         if R_blur > 0.05:
             blur_pixs = torch.nonzero(
                 ps_aware[lq_patch_size // 2:-lq_patch_size // 2, lq_patch_size // 2:-lq_patch_size // 2, 0],

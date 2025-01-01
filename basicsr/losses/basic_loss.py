@@ -8,6 +8,7 @@ from .loss_util import weighted_loss
 # import pyiqa
 from basicsr.archs.arch_util import flow_warp
 import numpy as np
+
 _reduction_modes = ['none', 'mean', 'sum']
 
 
@@ -23,7 +24,8 @@ def mse_loss(pred, target):
 
 @weighted_loss
 def charbonnier_loss(pred, target, eps=1e-12):
-    return torch.sqrt((pred - target)**2 + eps)
+    return torch.sqrt((pred - target) ** 2 + eps)
+
 
 """ @LOSS_REGISTRY.register()
 class LPIPSLoss(nn.Module):
@@ -35,6 +37,8 @@ class LPIPSLoss(nn.Module):
 
     def forward(self, x, gt):
         return self.model(x, gt) * self.loss_weight, None """
+
+
 @LOSS_REGISTRY.register()
 class PSNRLoss(nn.Module):
 
@@ -44,7 +48,7 @@ class PSNRLoss(nn.Module):
         self.loss_weight = loss_weight
         self.scale = 10 / np.log(10)
         self.toY = toY
-        self.coef = torch.tensor([65.481, 128.553, 24.966]).reshape(1,1, 3, 1, 1)
+        self.coef = torch.tensor([65.481, 128.553, 24.966]).reshape(1, 1, 3, 1, 1)
         self.first = True
 
     def forward(self, pred, target):
@@ -54,19 +58,21 @@ class PSNRLoss(nn.Module):
                 self.coef = self.coef.to(pred.device)
                 self.first = False
 
-            pred = (pred*255. * self.coef).sum(dim=2).unsqueeze(dim=2) + 16.
-            target = (target*255. * self.coef).sum(dim=2).unsqueeze(dim=2) + 16.
+            pred = (pred * 255. * self.coef).sum(dim=2).unsqueeze(dim=2) + 16.
+            target = (target * 255. * self.coef).sum(dim=2).unsqueeze(dim=2) + 16.
 
             pred, target = pred / 255., target / 255.
             pass
         # assert len(pred.size()) == 4
 
-        return self.loss_weight * self.scale * torch.log(((pred - target) ** 2).mean(dim=(1, 2, 3,4)) + 1e-8).mean()
+        return self.loss_weight * self.scale * torch.log(((pred - target) ** 2).mean(dim=(1, 2, 3, 4)) + 1e-8).mean()
+
 
 @LOSS_REGISTRY.register()
 class WarpLoss(nn.Module):
     """warp loss.
     """
+
     def __init__(self, loss_weight=1.0, reduction='mean', eps=1e-12):
         super(WarpLoss, self).__init__()
         # self.model = pyiqa.create_metric('lpips-vgg', as_loss=True)
@@ -80,12 +86,14 @@ class WarpLoss(nn.Module):
         # flow: b,t,2,h,w
         # this function cal the warp loss from x1 seq to x2 seq
         # weight (Tensor, optional): of shape (N, C, H, W). Element-wise weights. Default: None.
-        b,t,c,h,w = x1.shape
-        x1_down = F.adaptive_avg_pool2d(x1.reshape(b*t,c,h,w),(h//4,w//4))
-        x2_down = F.adaptive_avg_pool2d(x2.reshape(b*t,c,h,w),(h//4,w//4))
+        b, t, c, h, w = x1.shape
+        x1_down = F.adaptive_avg_pool2d(x1.reshape(b * t, c, h, w), (h // 4, w // 4))
+        x2_down = F.adaptive_avg_pool2d(x2.reshape(b * t, c, h, w), (h // 4, w // 4))
 
-        x1_down_warp = flow_warp(x1_down,flow.reshape(b*t,2,h//4,w//4).permute(0,2,3,1))
-        return  self.loss_weight * charbonnier_loss(x1_down_warp,x2_down ,weight,eps=self.eps, reduction=self.reduction)
+        x1_down_warp = flow_warp(x1_down, flow.reshape(b * t, 2, h // 4, w // 4).permute(0, 2, 3, 1))
+        return self.loss_weight * charbonnier_loss(x1_down_warp, x2_down, weight, eps=self.eps,
+                                                   reduction=self.reduction)
+
 
 @LOSS_REGISTRY.register()
 class L1Loss(nn.Module):
@@ -105,14 +113,17 @@ class L1Loss(nn.Module):
         self.loss_weight = loss_weight
         self.reduction = reduction
 
-    def forward(self, pred, target, weight=None, **kwargs):
+    def forward(self, pred, target, focus=None, weight=None, **kwargs):
         """
         Args:
             pred (Tensor): of shape (N, C, H, W). Predicted tensor.
             target (Tensor): of shape (N, C, H, W). Ground truth tensor.
             weight (Tensor, optional): of shape (N, C, H, W). Element-wise weights. Default: None.
         """
-        return self.loss_weight * l1_loss(pred, target, weight, reduction=self.reduction)
+        if focus is None:
+            return self.loss_weight * l1_loss(pred, target, weight, reduction=self.reduction)
+        else:
+            return self.loss_weight * l1_loss(pred, target, weight * focus, reduction=self.reduction)
 
 
 @LOSS_REGISTRY.register()
@@ -334,26 +345,22 @@ class WarpLossv2(nn.Module):
         self.loss_weight = loss_weight
         self.reduction = reduction
 
-    def forward(self,  gt_frames, flow_backwards, flow_forwards, weight=None, **kwargs):
+    def forward(self, gt_frames, flow_backwards, flow_forwards, weight=None, **kwargs):
         """
         Args:
             pred (Tensor): of shape (N, C, H, W). Predicted tensor.
             target (Tensor): of shape (N, C, H, W). Ground truth tensor.
             weight (Tensor, optional): of shape (N, C, H, W). Element-wise weights. Default: None.
         """
-        n,t,c,h,w = gt_frames.shape
+        n, t, c, h, w = gt_frames.shape
         lqs_1 = gt_frames[:, :-1, :, :, :].reshape(-1, c, h, w)
         lqs_2 = gt_frames[:, 1:, :, :, :].reshape(-1, c, h, w)
-        lqs_1 = F.adaptive_avg_pool2d(lqs_1,(h//4,w//4))
-        lqs_2 = F.adaptive_avg_pool2d(lqs_2,(h//4,w//4))
-        lqs_1_warp_2 = flow_warp(lqs_1,flow_forwards.reshape(-1,2,h//4,w//4).permute(0, 2, 3, 1))
-        lqs_2_warp_1 = flow_warp(lqs_2,flow_backwards.reshape(-1,2,h//4,w//4).permute(0, 2, 3, 1))
+        lqs_1 = F.adaptive_avg_pool2d(lqs_1, (h // 4, w // 4))
+        lqs_2 = F.adaptive_avg_pool2d(lqs_2, (h // 4, w // 4))
+        lqs_1_warp_2 = flow_warp(lqs_1, flow_forwards.reshape(-1, 2, h // 4, w // 4).permute(0, 2, 3, 1))
+        lqs_2_warp_1 = flow_warp(lqs_2, flow_backwards.reshape(-1, 2, h // 4, w // 4).permute(0, 2, 3, 1))
         flow_forwards_loss = l1_loss(lqs_1_warp_2, lqs_2, weight, reduction=self.reduction)
         flow_backwards_loss = l1_loss(lqs_2_warp_1, lqs_1, weight, reduction=self.reduction)
-        flow_loss = 0.5*flow_forwards_loss + 0.5*flow_backwards_loss
+        flow_loss = 0.5 * flow_forwards_loss + 0.5 * flow_backwards_loss
 
         return self.loss_weight * flow_loss
-
-
-
-

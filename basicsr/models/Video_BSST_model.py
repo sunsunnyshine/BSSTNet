@@ -216,20 +216,21 @@ class ModelBSST(BaseModel):
 
         self.lq = self.lq.half()
         with torch.cuda.amp.autocast():
-            output = self.net_g(self.lq, self.pm, flows_forwards_raft, flows_backwards_raft)
+            output, focus = self.net_g(self.lq, self.pm, flows_forwards_raft, flows_backwards_raft)
 
             self.output = output
+            self.focus = focus
 
             loss_dict = OrderedDict()
 
             l_pix = self.cri_pix(output, self.gt)
-            l_pix_weighted = self.cri_pix(output, self.gt, self.hm)
+            l_pix_weighted = self.cri_pix(output, focus, self.gt, self.hm)
 
             loss_dict['l_pix'] = l_pix
             loss_dict['l_pix_weighted'] = l_pix_weighted
 
             # Loss: L1 + L1_weighted + 0* Regularization
-            l_total = l_pix + l_pix_weighted + 0 * sum(p.sum() for p in self.net_g.parameters())
+            l_total = l_pix + 10 * l_pix_weighted + 0 * sum(p.sum() for p in self.net_g.parameters())
 
         # l_total.backward()
         self.scaler.scale(l_total).backward()
@@ -263,6 +264,8 @@ class ModelBSST(BaseModel):
             w_idx_list = list(range(0, w - size_patch_testing, stride)) + [max(0, w - size_patch_testing)]
             E = torch.zeros(b, t, c, h, w)
             W = torch.zeros_like(E)
+            focus_E = torch.zeros(b, t, 1, h, w)
+            focus_W = torch.zeros_like(focus_E)
             for h_idx in h_idx_list:
                 for w_idx in w_idx_list:
                     with torch.cuda.amp.autocast():
@@ -272,30 +275,44 @@ class ModelBSST(BaseModel):
                                          w_idx // 4:w_idx // 4 + size_patch_testing // 4]
                         flows_backwards = flows_backwards_all[..., (h_idx) // 4:h_idx // 4 + size_patch_testing // 4,
                                           w_idx // 4:w_idx // 4 + size_patch_testing // 4]
-                        out_patch = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards)
+                        out_patch, focus = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards)
 
                     out_patch = out_patch.detach().cpu().reshape(b, t, c, size_patch_testing, size_patch_testing)
-
+                    focus_patch = focus.detach().cpu().reshape(b, t, 1, size_patch_testing, size_patch_testing)
                     out_patch_mask = torch.ones_like(out_patch)
+                    focus_patch_mask = torch.ones_like(focus_patch)
 
                     if True:
                         if h_idx < h_idx_list[-1]:
                             out_patch[..., -overlap_size // 2:, :] *= 0
                             out_patch_mask[..., -overlap_size // 2:, :] *= 0
+                            focus_patch[..., -overlap_size // 2:, :] *= 0
+                            focus_patch_mask[..., -overlap_size // 2:, :] *= 0
                         if w_idx < w_idx_list[-1]:
                             out_patch[..., :, -overlap_size // 2:] *= 0
                             out_patch_mask[..., :, -overlap_size // 2:] *= 0
+                            focus_patch[..., :, -overlap_size // 2:] *= 0
+                            focus_patch_mask[..., :, -overlap_size // 2:] *= 0
                         if h_idx > h_idx_list[0]:
                             out_patch[..., :overlap_size // 2, :] *= 0
                             out_patch_mask[..., :overlap_size // 2, :] *= 0
+                            focus_patch[..., :overlap_size // 2, :] *= 0
+                            focus_patch_mask[..., :overlap_size // 2, :] *= 0
                         if w_idx > w_idx_list[0]:
                             out_patch[..., :, :overlap_size // 2] *= 0
                             out_patch_mask[..., :, :overlap_size // 2] *= 0
+                            focus_patch[..., :, :overlap_size // 2] *= 0
+                            focus_patch_mask[..., :, :overlap_size // 2] *= 0
 
                     E[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(out_patch)
                     W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(out_patch_mask)
+                    focus_E[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(focus_patch)
+                    focus_W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(focus_patch_mask)
+
             output = E.div_(W)
+            focus_output = focus_E.div_(focus_W)
         self.output = output[:, :, :, :, :]
+        self.focus = focus_output[:, :, :, :, :]
         self.net_g.train()
 
     def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False):
@@ -346,6 +363,7 @@ class ModelBSST(BaseModel):
             del self.output
             del self.gt
             del self.hm
+            del self.focus
 
             if seq_index[0] == 52:
                 # print(True)
@@ -353,21 +371,25 @@ class ModelBSST(BaseModel):
                 visuals['result'] = visuals['result'][:, -10:-2, ...]
                 visuals['gt'] = visuals['gt'][:, -10:-2, ...]
                 visuals['hm'] = visuals['hm'][:, -10:-2, ...]
+                visuals['focus'] = visuals['focus'][:, -10:-2, ...]
             elif seq_index[0] == 86:
                 visuals['lq'] = visuals['lq'][:, 4:-2, ...]
                 visuals['result'] = visuals['result'][:, 4:-2, ...]
                 visuals['gt'] = visuals['gt'][:, 4:-2, ...]
                 visuals['hm'] = visuals['hm'][:, 4:-2, ...]
+                visuals['focus'] = visuals['focus'][:, 4:-2, ...]
             elif seq_index[0] == 29:
                 visuals['lq'] = visuals['lq'][:, 17:-2, ...]
                 visuals['result'] = visuals['result'][:, 17:-2, ...]
                 visuals['gt'] = visuals['gt'][:, 17:-2, ...]
                 visuals['hm'] = visuals['hm'][:, 17:-2, ...]
+                visuals['focus'] = visuals['focus'][:, 17:-2, ...]
             else:
                 visuals['lq'] = visuals['lq'][:, 2:-2, ...]
                 visuals['result'] = visuals['result'][:, 2:-2, ...]
                 visuals['gt'] = visuals['gt'][:, 2:-2, ...]
                 visuals['hm'] = visuals['hm'][:, 2:-2, ...]
+                visuals['focus'] = visuals['focus'][:, 2:-2, ...]
             torch.cuda.empty_cache()
             if i < num_seq:
                 for idx in range(visuals['result'].size(1)):
@@ -378,10 +400,12 @@ class ModelBSST(BaseModel):
                         gt = visuals['gt'][0, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr
                         metric_data['img2'] = gt_img
-                    if 'hm' in visuals:
+                    if 'hm' in visuals and 'focus' in visuals:
                         hm = visuals['hm'][0, idx, :, :, :]
-                        hm_img = tensor2img([hm])
-                        metric_data['mask'] = hm_img
+                        focus = visuals['focus'][0, idx, :, :, :]
+                        focus_mask = tensor2img([focus*hm])
+                        metric_data['mask'] = focus_mask
+
                     if with_metrics:
                         for metric_idx, opt_ in enumerate(self.opt['val']['metrics'].values()):
                             result = calculate_metric(metric_data, opt_)
@@ -453,6 +477,8 @@ class ModelBSST(BaseModel):
             out_dict['gt'] = self.gt.detach().cpu()
         if hasattr(self, 'hm'):
             out_dict['hm'] = self.hm.detach().cpu()
+        if hasattr(self, 'focus'):
+            out_dict['focus'] = self.focus.detach().cpu()
         return out_dict
 
     def save(self, epoch, current_iter):

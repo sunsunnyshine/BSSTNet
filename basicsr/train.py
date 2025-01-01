@@ -172,13 +172,13 @@ def train_pipeline(root_path):
     logger.info(f'Start training from epoch: {start_epoch}, iter: {current_iter}')
     data_timer, iter_timer = AvgTimer(), AvgTimer()
     start_time = time.time()
-    # if True:
-    #     if len(val_loaders) > 1:
-    #         logger.warning('Multiple validation datasets are *only* supported by SRModel.')
-    #     for val_loader in val_loaders:
-    #
-    #         model.validation(val_loader, current_iter, tb_logger,wandb_logger, opt['val']['save_img'])
+    if True:
+        if len(val_loaders) > 1:
+            logger.warning('Multiple validation datasets are *only* supported by SRModel.')
+        for val_loader in val_loaders:
 
+            model.validation(val_loader, current_iter, tb_logger, wandb_logger, opt['val']['save_img'])
+            # pass
     for epoch in range(start_epoch, total_epochs + 1):
         train_sampler.set_epoch(epoch)
         prefetcher.reset()

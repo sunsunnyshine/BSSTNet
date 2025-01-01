@@ -507,19 +507,22 @@ class VideoRecurrentTestDatasetlocal(VideoDeblurTestDataset):
         imgs_pm = read_img_seq(pm_paths)
         imgs_hm = read_img_seq(hm_paths)
 
-        ## resize the imgs_hm to the same size as imgs_gt，because our hardmask is generated from demo.
-        H, W = imgs_gt.shape[2], imgs_gt.shape[3]
-        imgs_hm = torch.nn.functional.interpolate(imgs_hm, size=(H, W), mode='bilinear', align_corners=False)
+        # resize the images,gts,pms to the same size with hms [720,1280]
+        H, W = imgs_hm.shape[2], imgs_hm.shape[3]
+        imgs_lq = torch.nn.functional.interpolate(imgs_lq, size=(H, W), mode='bilinear', align_corners=False)
+        imgs_gt = torch.nn.functional.interpolate(imgs_gt, size=(H, W), mode='bilinear', align_corners=False)
+        imgs_pm = torch.nn.functional.interpolate(imgs_pm, size=(H, W), mode='bilinear', align_corners=False)
+
 
         return {
-            'lq': imgs_lq,
-            'gt': imgs_gt,
-            'pm': imgs_pm,
-            'hm': imgs_hm,
-            'folder': folder,
-            'seq_name': seq_name,
-            'seq': selected_index
-        }
+                'lq': imgs_lq,
+                'gt': imgs_gt,
+                'pm': imgs_pm,
+                'hm': imgs_hm,
+                'folder': folder,
+                'seq_name': seq_name,
+                'seq': selected_index
+            }
 
     def __len__(self):
         return len(self.seq_names)

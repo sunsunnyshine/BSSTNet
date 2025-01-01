@@ -20,6 +20,7 @@ from basicsr.ops.dcn import ModulatedDeformConvPack
 from basicsr.archs.propainter.sparse_transformer import TemporalSparseTransformerBlock, SoftComp, SoftSplit
 from basicsr.archs.propainter.recurrent_flow_completion import RecurrentFlowCompleteNet
 from basicsr.archs.gshift_arch import Encoder_shift_block, CAB, PixelShufflePack, SkipUpSample, conv, CAB1, CAB2
+from basicsr.archs.blur_percep_util import BlurDetector
 
 
 class SecondOrderDeformableAlignmentWithBlurmapguide(ModulatedDeformConvPack):
@@ -676,12 +677,12 @@ class BSST(nn.Module):
             norm_layer (obj): Normalization layer. Default: nn.LayerNorm.
             inputconv_groups (int): Group of the first convolution layer in RSTBWithInputConv. Default: [1,1,1,1,1,1]
             max_residue_magnitude (int): The maximum magnitude of the offset
-            residue. Default: 5. 
+            residue. Default: 5.
             cpu_cache_length: When the length of sequence is larger
             than this value, the intermediate features are sent to CPU. This
             saves GPU memory, but slows down the inference speed. You can
             increase this number if you have a GPU with large memory.
-            Default: 100. 
+            Default: 100.
     """
 
     def __init__(self,
@@ -698,7 +699,10 @@ class BSST(nn.Module):
                  norm_layer=nn.LayerNorm,
                  inputconv_groups=[1, 3, 3, 3, 3, 3],
                  max_residue_magnitude=5,
-                 cpu_cache_length=150
+                 cpu_cache_length=150,
+                 sensitivity='low',
+                 computation_stride=16
+
                  ):
         super().__init__()
         self.upscale = upscale
@@ -802,7 +806,8 @@ class BSST(nn.Module):
 
         self.blur_motion_refine = RecurrentFlowCompleteNet()
 
-        self.blur_aware = FlowWarpingLoss()
+        # Initialize BlurDetector
+        self.blur_detector = BlurDetector(sensitivity=sensitivity, computation_stride=computation_stride)
 
     def init_weights(self, init_type='normal', gain=0.01):
         '''
@@ -992,7 +997,7 @@ class BSST(nn.Module):
         hr += lqs
         return hr
 
-    def forward(self, lqs, pms, flows_forwards_gt, flows_backwards_gt):
+    def forward(self, lqs, pms, flows_forward, flows_backward):
         """Forward function for BSSTNet.
 
         Args:
@@ -1006,7 +1011,7 @@ class BSST(nn.Module):
         # start_time = time.time()
         n, t, _, h, w = lqs.size()
 
-        #
+        # predict mask
         pms = pms[:, :, 1, ...].unsqueeze(2)
 
         # whether to cache the features in CPU
@@ -1031,22 +1036,14 @@ class BSST(nn.Module):
         ############################################
         feats['spatial'] = [feat_[:, i, ...] for i in range(feat_.size(1))]
 
-        flows_forward, flows_backward = flows_forwards_gt, flows_backwards_gt
-        pred_motion_st_blur_map = get_blur_map(flows_forwards_gt, flows_backwards_gt)
-
-        flows_forward, flows_backward = self.blur_motion_refine.forward_bidirect_flow(pred_motion_st_blur_map,
+        # Detect blur
+        blur_map_origin = self.blur_detector.detect_blur(lqs.flatten(0, 1))
+        blur_map = F.interpolate(blur_map_origin, size=(h // 4, w // 4), mode='bilinear', align_corners=False)
+        # refine and fix the flow use Propainter
+        flows_forward, flows_backward = self.blur_motion_refine.forward_bidirect_flow(blur_map.unsqueeze(0),
                                                                                       [flows_forward, flows_backward])
 
-        # temporal sharpness prior ,from https://github.com/csbhr/CDVD-TSP 4.3
-        # lqs.shape [B,T,C,H,W]
-        # blur_score = 1-exp(x), shape is [B, T, 1, H, W]
-        blur_map = torch.cat((torch.zeros((1, 1, *flows_forward.shape[-2:])).to(lqs.device),
-                              self.blur_aware(lqs[0, :-1, ...], lqs[0, 1:, ...], flows_forward.squeeze(0))), dim=0) + \
-                   torch.cat((self.blur_aware(lqs[0, 1:, ...], lqs[0, :-1, ...], flows_backward.squeeze(0)),
-                              torch.zeros((1, 1, *flows_forward.shape[-2:])).to(lqs.device)),
-                             dim=0)
-        blur_map[1:-1, :, :, :] /= 2
-        sharp_map_st = torch.exp(-1 * blur_map)
+        sharp_map_st = 1 - blur_map
         sharp_map_st = sharp_map_st.detach()
         pms = pms.detach()
         pms = F.interpolate(pms[0], size=blur_map.shape[-2:], mode='bilinear', align_corners=False)
@@ -1085,7 +1082,6 @@ class BSST(nn.Module):
         _, c, h, w = pms_win.shape
         pms_win = pms_win.view(n, t, c, h, w)
         sharp_map_st_win = sharp_map_st_win.view(n, t, c, h, w)
-
 
         # Spatial Sparse: only reserve the area where target used to appear.
         pms_win_hard_map = torch.where(pms_win > 0.3, torch.ones_like(pms_win), torch.zeros_like(pms_win))
@@ -1141,5 +1137,7 @@ class BSST(nn.Module):
         dec11_out = self.last_conv(dec11_out)
         dec11_out = dec11_out.unsqueeze(0) + lqs
 
+        # focus edge area
+        focus = 1 - blur_map_origin
         # reconstruction
-        return dec11_out
+        return dec11_out, focus.unsqueeze(0)
