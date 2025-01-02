@@ -190,18 +190,22 @@ class ModelBSST(BaseModel):
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data):
-        lq, gt, pm, hm = data['lq'], data['gt'], data['pm'], data['hm']
+        lq, gt, pm, hm, fw, bw = data['lq'], data['gt'], data['pm'], data['hm'], data['fw'], data['bw']
         self.lq = lq.to(self.device)
         self.gt = gt.to(self.device)
         self.pm = pm.to(self.device)
         self.hm = hm.to(self.device)
+        self.fw = fw.to(self.device)
+        self.bw = bw.to(self.device)
 
     def feed_data_test(self, data):
-        lq, gt, pm, hm = data['lq'], data['gt'], data['pm'], data['hm']
+        lq, gt, pm, hm = data['lq'], data['gt'], data['pm'], data['hm'], data['fw'], data['bw']
         self.lq = lq.to(self.device).unsqueeze(0)
         self.gt = gt.to(self.device).unsqueeze(0)
         self.pm = pm.to(self.device).unsqueeze(0)
         self.hm = hm.to(self.device).unsqueeze(0)
+        self.fw = fw.to(self.device)
+        self.bw = bw.to(self.device)
 
     def optimize_parameters(self, current_iter):
         if self.fix_flow_iter:
@@ -217,7 +221,7 @@ class ModelBSST(BaseModel):
 
         # self.lq = self.lq.half()
         # with torch.cuda.amp.autocast():
-        output, focus = self.net_g(self.lq, self.pm, flows_forwards_raft, flows_backwards_raft)
+        output, focus = self.net_g(self.lq, self.pm, flows_forwards_raft, flows_backwards_raft, self.fw, self.bw)
 
         self.output = output
         self.focus = focus

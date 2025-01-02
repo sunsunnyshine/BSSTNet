@@ -5,7 +5,7 @@ from pathlib import Path
 from torch.utils import data as data
 
 from basicsr.data.transforms import augment, paired_random_crop, paired_random_crop_target_aware
-from basicsr.utils import FileClient, get_root_logger, imfrombytes, img2tensor
+from basicsr.utils import FileClient, get_root_logger, imfrombytes, img2tensor, readFlow
 from basicsr.utils.flow_util import dequantize_flow
 from basicsr.utils.registry import DATASET_REGISTRY
 
@@ -53,9 +53,11 @@ class DeblurRecurrentDataset(data.Dataset):
     def __init__(self, opt):
         super(DeblurRecurrentDataset, self).__init__()
         self.opt = opt
-        self.gt_root, self.lq_root, self.pm_root, self.hm_root = Path(opt['dataroot_gt']), Path(
+        self.gt_root, self.lq_root, self.pm_root, self.hm_root, self.fw_residual_root, self.bw_residual_root = Path(
+            opt['dataroot_gt']), Path(
             opt['dataroot_lq']), Path(
-            opt['dataroot_pm']), Path(opt['dataroot_hm'])
+            opt['dataroot_pm']), Path(opt['dataroot_hm']), Path(opt['dataroot_fw_residual']), Path(
+            opt['dataroot_bw_residual'])
         self.num_frame = opt['num_frame']
         self.file_end = opt["file_end"]
         self.cache_data = opt["cache_data"]
@@ -133,17 +135,23 @@ class DeblurRecurrentDataset(data.Dataset):
         img_gts = []
         img_pms = []
         img_hms = []
+        img_fws = []
+        img_bws = []
         for neighbor in neighbor_list:
             if self.is_lmdb:
                 img_lq_path = f'{clip_name}/{neighbor:05d}'
                 img_gt_path = f'{clip_name}/{neighbor:05d}'
                 img_pm_path = f'{clip_name}/{neighbor:05d}'
                 img_hm_path = f'{clip_name}/{neighbor:05d}'
+                img_fw_residual_path = f'{clip_name}/{neighbor:05d}'
+                img_bw_residual_path = f'{clip_name}/{neighbor:05d}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:05d}.{self.file_end}'
                 img_gt_path = self.gt_root / clip_name / f'{neighbor:05d}.{self.file_end}'
                 img_pm_path = self.pm_root / clip_name / f'{neighbor:05d}.{self.file_end}'
                 img_hm_path = self.hm_root / clip_name / f'{neighbor:05d}.jpg'
+                img_fw_residual_path = self.fw_residual_root / clip_name / f'{neighbor:05d}.flo'
+                img_bw_residual_path = self.bw_residual_root / clip_name / f'{neighbor:05d}.flo'
 
             # get LQ
             img_bytes = self.file_client.get(img_lq_path, 'lq')
@@ -165,28 +173,45 @@ class DeblurRecurrentDataset(data.Dataset):
             img_hm = imfrombytes(img_bytes, float32=True)
             img_hms.append(img_hm)
 
+            # get forward residual flow
+            img_fw_residual = readFlow(img_fw_residual_path)
+            img_fws.append(img_fw_residual)
+
+            # get backward residual flow
+            img_bw_residual = readFlow(img_bw_residual_path)
+            img_bws.append(img_bw_residual)
+
         # randomly crop
-        img_gts, img_lqs, img_pms, img_hms = paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_size, scale,
-                                                                    self.force_blur_region_p, img_gt_path)
+        img_gts, img_lqs, img_pms, img_hms, img_bws, img_fws = paired_random_crop_target_aware(img_gts, img_lqs,
+                                                                                               img_pms, img_hms,
+                                                                                               img_bws, img_fws,
+                                                                                               gt_size, scale,
+                                                                                               self.force_blur_region_p,
+                                                                                               img_gt_path)
 
         # augmentation - flip, rotate
         len = img_gts.__len__()
         img_lqs.extend(img_gts)
         img_lqs.extend(img_pms)
         img_lqs.extend(img_hms)
-        img_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'])
+        img_fws.extend(img_bws)
+        img_results, flow_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'], flows=img_fws)
 
         img_results = img2tensor(img_results)
         img_lqs = torch.stack(img_results[:len], dim=0)
         img_gts = torch.stack(img_results[len:2 * len], dim=0)
-        img_pms = torch.stack(img_results[2 * len:3*len], dim=0)
+        img_pms = torch.stack(img_results[2 * len:3 * len], dim=0)
         img_hms = torch.stack(img_results[3 * len:], dim=0)
+
+        flow_results = img2tensor(flow_results, bgr2rgb=False, float32=True)
+        img_fws = torch.stack(flow_results[:len], dim=0)
+        img_bws = torch.stack(flow_results[len:], dim=0)
 
         # img_lqs: (t, c, h, w)
         # img_gts: (t, c, h, w)
         # key: str
         # return {'lq': img_lqs, 'gt': img_gts, 'key': key}
-        return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms,'hm': img_hms,
+        return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms, 'hm': img_hms, 'fw': img_fws, 'bw': img_bws,
                 'folder': [f"{clip_name}.{neighbor_list[0]}", f"{clip_name}.{neighbor_list[1]}"]}
 
     def __len__(self):

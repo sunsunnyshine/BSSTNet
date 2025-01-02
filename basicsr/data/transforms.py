@@ -24,7 +24,7 @@ def mod_crop(img, scale):
     return img
 
 
-def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch_size, scale,
+def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, img_bws, img_fws, gt_patch_size, scale,
                                     force_blur_region_p=0.5, gt_path=None):
     if not isinstance(img_gts, list):
         img_gts = [img_gts]
@@ -34,12 +34,20 @@ def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch
         img_pms = [img_pms]
     if not isinstance(img_hms, list):
         img_hms = [img_hms]
+    if not isinstance(img_bws, list):
+        img_bws = [img_bws]
+    if not isinstance(img_fws, list):
+        img_fws = [img_fws]
 
     # resize the images,gts,pms to the same size with hms [720,1280]
+    scale_factor = 4
     img_gts = [cv2.resize(v, (img_hms[0].shape[1], img_hms[0].shape[0])) for v in img_gts]
     img_lqs = [cv2.resize(v, (img_hms[0].shape[1], img_hms[0].shape[0])) for v in img_lqs]
     img_pms = [cv2.resize(v, (img_hms[0].shape[1], img_hms[0].shape[0])) for v in img_pms]
-
+    img_fws = [cv2.resize(v, (img_hms[0].shape[1] // scale_factor, img_hms[0].shape[0] // scale_factor)) for v in
+               img_fws]
+    img_bws = [cv2.resize(v, (img_hms[0].shape[1] // scale_factor, img_hms[0].shape[0] // scale_factor)) for v in
+               img_bws]
 
     # determine input type: Numpy array or Tensor
     input_type = 'Tensor' if torch.is_tensor(img_gts[0]) else 'Numpy'
@@ -108,12 +116,26 @@ def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch
     # crop corresponding gt patch
     centor_h, centor_w = int(centor_h * scale), int(centor_w * scale)
     if input_type == 'Tensor':
-        img_gts = [v[ centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
+        img_gts = [v[centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
                    centor_w - lq_patch_size // 2:centor_w + lq_patch_size // 2, :] for v in img_gts]
     else:
         img_gts = [v[centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
                    centor_w - lq_patch_size // 2:centor_w + lq_patch_size // 2] for v in img_gts]
 
+    # crop the corresponding bw and fw patch
+    centor_w = centor_w // scale_factor
+    centor_h = centor_h // scale_factor
+    lq_patch_size = lq_patch_size // scale_factor
+    if input_type == 'Tensor':
+        img_fws = [v[centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
+                   centor_w - lq_patch_size // 2:centor_w + lq_patch_size // 2, :] for v in img_fws]
+        img_bws = [v[centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
+                   centor_w - lq_patch_size // 2:centor_w + lq_patch_size // 2, :] for v in img_bws]
+    else:
+        img_fws = [v[centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
+                   centor_w - lq_patch_size // 2:centor_w + lq_patch_size // 2] for v in img_fws]
+        img_bws = [v[centor_h - lq_patch_size // 2:centor_h + lq_patch_size // 2,
+                   centor_w - lq_patch_size // 2:centor_w + lq_patch_size // 2] for v in img_bws]
 
     if len(img_gts) == 1:
         img_gts = img_gts[0]
@@ -123,8 +145,12 @@ def paired_random_crop_target_aware(img_gts, img_lqs, img_pms, img_hms, gt_patch
         img_pms = img_pms[0]
     if len(img_hms) == 1:
         img_hms = img_hms[0]
+    if len(img_fws) == 1:
+        img_fws = img_fws[0]
+    if len(img_bws) == 1:
+        img_bws = img_bws[0]
 
-    return img_gts, img_lqs, img_pms, img_hms
+    return img_gts, img_lqs, img_pms, img_hms, img_bws, img_fws
 
 
 def paired_random_crop(img_gts, img_lqs, gt_patch_size, scale, gt_path=None):

@@ -701,8 +701,8 @@ class BSST(nn.Module):
                  max_residue_magnitude=5,
                  cpu_cache_length=150,
                  sensitivity='low',
-                 computation_stride=16
-
+                 computation_stride=16,
+                 max_flow=20.0
                  ):
         super().__init__()
         self.upscale = upscale
@@ -808,6 +808,8 @@ class BSST(nn.Module):
 
         # Initialize BlurDetector
         self.blur_detector = BlurDetector(sensitivity=sensitivity, computation_stride=computation_stride)
+
+        self.max_flow = max_flow
 
     def init_weights(self, init_type='normal', gain=0.01):
         '''
@@ -997,7 +999,7 @@ class BSST(nn.Module):
         hr += lqs
         return hr
 
-    def forward(self, lqs, pms, flows_forward, flows_backward):
+    def forward(self, lqs, pms, flows_forward, flows_backward, fw_residual, bw_residual):
         """Forward function for BSSTNet.
 
         Args:
@@ -1037,17 +1039,16 @@ class BSST(nn.Module):
         feats['spatial'] = [feat_[:, i, ...] for i in range(feat_.size(1))]
 
         # Detect blur
-        blur_map_origin = self.blur_detector.detect_blur(lqs.flatten(0, 1))
-        blur_map = F.interpolate(blur_map_origin, size=(h // 4, w // 4), mode='bilinear', align_corners=False)
+        target_blur_map = 0.5 * torch.clamp(torch.abs(fw_residual), min=0, max=self.max_flow) / self.max_flow \
+                          + 0.5 * torch.clamp(torch.abs(bw_residual), min=0, max=self.max_flow) / self.max_flow
         # refine and fix the flow use Propainter
-        flows_forward, flows_backward = self.blur_motion_refine.forward_bidirect_flow(blur_map.unsqueeze(0),
+        flows_forward, flows_backward = self.blur_motion_refine.forward_bidirect_flow(target_blur_map,
                                                                                       [flows_forward, flows_backward])
 
-        sharp_map_st = 1 - blur_map
-        sharp_map_st = sharp_map_st.detach()
         pms = pms.detach()
         pms = F.interpolate(pms[0], size=blur_map.shape[-2:], mode='bilinear', align_corners=False)
-        target_and_sharp = (sharp_map_st * pms).unsqueeze(0)
+        target_sharp_map = (1 - target_blur_map) * pms
+        target_sharp_map = target_sharp_map.detach()
 
         # Target-aware bidirectional feature propagation
         for iter_ in [1]:
@@ -1061,7 +1062,7 @@ class BSST(nn.Module):
                 module_name = f'{direction}_{iter_}'
                 feats[module_name] = []
                 # only propagation the salient object features
-                feats = self.propagate(feats, flows, flows_check, target_and_sharp, module_name)
+                feats = self.propagate(feats, flows, flows_check, target_sharp_map, module_name)
 
         feats['spatial'] = torch.stack(feats['spatial'], 1)
         feats['backward_1'] = torch.stack(feats['backward_1'], 1)
@@ -1074,7 +1075,7 @@ class BSST(nn.Module):
         n, t, c, h, w = pms.unsqueeze(0).shape
 
         pms_win = self.max_pool(pms.view(n * t, c, h, w))
-        sharp_map_st_win = self.max_pool(sharp_map_st.view(n * t, c, h, w))
+        sharp_map_st_win = self.max_pool(target_sharp_map.view(n * t, c, h, w))
         pms_win = self.max_pool2(pms_win)
         sharp_map_st_win = self.max_pool2(sharp_map_st_win)
         pms_win = pms_win.view(n * t, 1, pms_win.shape[-2], pms_win.shape[-1])
@@ -1138,6 +1139,6 @@ class BSST(nn.Module):
         dec11_out = dec11_out.unsqueeze(0) + lqs
 
         # focus edge area
-        focus = 1 - blur_map_origin
+        focus = target_sharp_map
         # reconstruction
         return dec11_out, focus.unsqueeze(0)

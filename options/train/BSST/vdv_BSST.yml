@@ -5,7 +5,7 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: vdv_BSST
+name: vdv_BSST_debug
 model_type: ModelBSST
 manual_seed: 0
 num_gpu: auto
@@ -17,6 +17,7 @@ softconv_ratio: 0.5
 no_fix_flow: true
 network_g:
   type: BSST
+  max_flow: 15.0
 datasets:
   train:
     name: VideoDeblur
@@ -25,6 +26,8 @@ datasets:
     dataroot_lq: ./datasets/VDV/train/blur
     dataroot_pm: ./datasets/VDV/train/PredictMask
     dataroot_hm: ./datasets/VDV/train/HardMask
+    dataroot_fw_residual: ./datasets/VDV/train/fw_residual
+    dataroot_bw_residual: ./datasets/VDV/train/bw_residual
 
     meta_info_file: basicsr/data/meta_info/VDV_train.txt
     val_partition: ~
@@ -57,6 +60,8 @@ datasets:
     dataroot_lq: ./datasets/VDV/test/blur
     dataroot_pm: ./datasets/VDV/test/PredictMask
     dataroot_hm: ./datasets/VDV/test/HardMask
+    dataroot_fw_residual: ./datasets/VDV/test/fw_residual
+    dataroot_bw_residual: ./datasets/VDV/test/bw_residual
 
     cache_data: false
     io_backend:
@@ -120,6 +125,7 @@ logger:
   save_checkpoint_freq: 2500
   use_tb_logger: true
   show_tf_imgs_freq: 500
+  name: vdv_BSST_20250102
   wandb:
     project: ~
     resume_id: ~
