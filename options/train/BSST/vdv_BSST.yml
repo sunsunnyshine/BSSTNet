@@ -5,7 +5,7 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: vdv_BSST_debug
+name: vdv_BSST
 model_type: ModelBSST
 manual_seed: 0
 num_gpu: auto
@@ -34,10 +34,10 @@ datasets:
     file_end: png
     cache_data: false
 
-    num_frame: 12
+    num_frame: 10
     scale: 1
     gt_size: 256
-    interval_list: [1]
+    interval_list: [2]
     random_reverse: false
     use_hflip: True
     use_rot: false

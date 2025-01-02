@@ -19,6 +19,7 @@ from basicsr.utils.registry import MODEL_REGISTRY
 from basicsr.utils.logger import AverageMeter
 from basicsr.archs.RAFT.raft import RAFT
 from basicsr.archs.RAFT.utils.utils import InputPadder
+import math
 
 
 def get_dist_info():
@@ -214,28 +215,28 @@ class ModelBSST(BaseModel):
 
         flows_forwards_raft, flows_backwards_raft = self.get_bi_flows(self.lq)
 
-        self.lq = self.lq.half()
-        with torch.cuda.amp.autocast():
-            output, focus = self.net_g(self.lq, self.pm, flows_forwards_raft, flows_backwards_raft)
+        # self.lq = self.lq.half()
+        # with torch.cuda.amp.autocast():
+        output, focus = self.net_g(self.lq, self.pm, flows_forwards_raft, flows_backwards_raft)
 
-            self.output = output
-            self.focus = focus
+        self.output = output
+        self.focus = focus
 
-            loss_dict = OrderedDict()
+        loss_dict = OrderedDict()
 
-            l_pix = self.cri_pix(output, self.gt)
-            l_pix_weighted = self.cri_pix(output, focus, self.gt, self.hm)
+        l_pix = self.cri_pix(output, self.gt)
+        l_pix_weighted = self.cri_pix(output, self.gt, focus=focus, weight=self.hm)
 
-            loss_dict['l_pix'] = l_pix
-            loss_dict['l_pix_weighted'] = l_pix_weighted
+        loss_dict['l_pix'] = l_pix
+        loss_dict['l_pix_weighted'] = l_pix_weighted
 
-            # Loss: L1 + L1_weighted + 0* Regularization
-            l_total = l_pix + 10 * l_pix_weighted + 0 * sum(p.sum() for p in self.net_g.parameters())
+        # Loss: L1 + L1_weighted + 0* Regularization
+        l_total = 0.01 * l_pix + l_pix_weighted + 0 * sum(p.sum() for p in self.net_g.parameters())
 
         # l_total.backward()
         self.scaler.scale(l_total).backward()
         self.scaler.unscale_(self.optimizer_g)
-        torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
+        torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 1.0)
         self.scaler.step(self.optimizer_g)
         self.scaler.update()
 
@@ -306,8 +307,10 @@ class ModelBSST(BaseModel):
 
                     E[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(out_patch)
                     W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(out_patch_mask)
-                    focus_E[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(focus_patch)
-                    focus_W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(focus_patch_mask)
+                    focus_E[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(
+                        focus_patch)
+                    focus_W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(
+                        focus_patch_mask)
 
             output = E.div_(W)
             focus_output = focus_E.div_(focus_W)
@@ -403,7 +406,7 @@ class ModelBSST(BaseModel):
                     if 'hm' in visuals and 'focus' in visuals:
                         hm = visuals['hm'][0, idx, :, :, :]
                         focus = visuals['focus'][0, idx, :, :, :]
-                        focus_mask = tensor2img([focus*hm])
+                        focus_mask = tensor2img([focus * hm])
                         metric_data['mask'] = focus_mask
 
                     if with_metrics:
