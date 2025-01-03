@@ -3,7 +3,7 @@ import torch
 from os import path as osp
 from torch.utils import data as data
 
-from basicsr.data.data_util import duf_downsample, generate_frame_indices, read_img_seq
+from basicsr.data.data_util import duf_downsample, generate_frame_indices, read_img_seq, read_flo_seq
 from basicsr.utils import get_root_logger, scandir
 from basicsr.utils.registry import DATASET_REGISTRY
 
@@ -289,9 +289,11 @@ class VideoDeblurTestDataset(data.Dataset):
         super(VideoDeblurTestDataset, self).__init__()
         self.opt = opt
         self.cache_data = opt['cache_data']
-        self.gt_root, self.lq_root, self.pm_root, self.hm_root = opt['dataroot_gt'], opt['dataroot_lq'], opt[
-            'dataroot_pm'], opt['dataroot_hm']
-        self.data_info = {'lq_path': [], 'gt_path': [], 'pm_path': [], 'hm_path': [], 'folder': [], 'idx': [],
+        self.gt_root, self.lq_root, self.pm_root, self.hm_root, self.fw_root, self.bw_root = opt['dataroot_gt'], opt[
+            'dataroot_lq'], opt[
+            'dataroot_pm'], opt['dataroot_hm'], opt['dataroot_fw_residual'], opt['dataroot_bw_residual']
+        self.data_info = {'lq_path': [], 'gt_path': [], 'pm_path': [], 'hm_path': [], 'fw_path': [], 'bw_path': [],
+                          'folder': [], 'idx': [],
                           'border': []}
         # file client (io backend)
         self.file_client = None
@@ -300,7 +302,7 @@ class VideoDeblurTestDataset(data.Dataset):
 
         logger = get_root_logger()
         logger.info(f'Generate data info for VideoTestDataset - {opt["name"]}')
-        self.imgs_lq, self.imgs_gt, self.imgs_pm, self.imgs_hm = {}, {}, {}, {}
+        self.imgs_lq, self.imgs_gt, self.imgs_pm, self.imgs_hm, self.imgs_fw, self.imgs_bw = {}, {}, {}, {}, {}, {}
         if 'meta_info_file' in opt:
             with open(opt['meta_info_file'], 'r') as fin:
                 subfolders = [line.split(' ')[0] for line in fin]
@@ -308,21 +310,31 @@ class VideoDeblurTestDataset(data.Dataset):
                 subfolders_gt = [osp.join(self.gt_root, key) for key in subfolders]
                 subfolders_pm = [osp.join(self.pm_root, key) for key in subfolders]
                 subfolders_hm = [osp.join(self.hm_root, key) for key in subfolders]
+                subfolders_fw = [osp.join(self.fw_root, key) for key in subfolders]
+                subfolders_bw = [osp.join(self.bw_root, key) for key in subfolders]
         else:
             subfolders_lq = sorted(glob.glob(osp.join(self.lq_root, '*')))
             subfolders_gt = sorted(glob.glob(osp.join(self.gt_root, '*')))
             subfolders_pm = sorted(glob.glob(osp.join(self.pm_root, '*')))
             subfolders_hm = sorted(glob.glob(osp.join(self.hm_root, '*')))
+            subfolders_fw = sorted(glob.glob(osp.join(self.fw_root, '*')))
+            subfolders_bw = sorted(glob.glob(osp.join(self.bw_root, '*')))
 
         if opt['name'].lower() in ['vid4', 'reds4', 'redsofficial', 'dvd', 'gopro', 'vdv']:
-            for subfolder_lq, subfolder_gt, subfolder_pm, subfolder_hm in zip(subfolders_lq, subfolders_gt,
-                                                                              subfolders_pm, subfolders_hm):
+            for subfolder_lq, subfolder_gt, subfolder_pm, subfolder_hm, subfolder_fw, subfolder_bw in zip(subfolders_lq,
+                                                                                                          subfolders_gt,
+                                                                                                          subfolders_pm,
+                                                                                                          subfolders_hm,
+                                                                                                          subfolders_fw,
+                                                                                                          subfolders_bw):
                 # get frame list for lq and gt
                 subfolder_name = osp.basename(subfolder_lq)
                 img_paths_lq = sorted(list(scandir(subfolder_lq, full_path=True)))
                 img_paths_gt = sorted(list(scandir(subfolder_gt, full_path=True)))
                 img_paths_pm = sorted(list(scandir(subfolder_pm, full_path=True)))
                 img_paths_hm = sorted(list(scandir(subfolder_hm, full_path=True)))
+                img_paths_fw = sorted(list(scandir(subfolder_fw, full_path=True)))
+                img_paths_bw = sorted(list(scandir(subfolder_bw, full_path=True)))
                 max_idx = len(img_paths_lq)
                 assert max_idx == len(img_paths_gt), (f'Different number of images in lq ({max_idx})'
                                                       f' and gt folders ({len(img_paths_gt)})')
@@ -331,6 +343,8 @@ class VideoDeblurTestDataset(data.Dataset):
                 self.data_info['gt_path'].extend(img_paths_gt)
                 self.data_info['pm_path'].extend(img_paths_pm)
                 self.data_info['hm_path'].extend(img_paths_hm)
+                self.data_info['fw_path'].extend(img_paths_fw)
+                self.data_info['bw_path'].extend(img_paths_bw)
                 self.data_info['folder'].extend([subfolder_name] * max_idx)
                 for i in range(max_idx):
                     self.data_info['idx'].append(f'{i}/{max_idx}')
@@ -348,11 +362,15 @@ class VideoDeblurTestDataset(data.Dataset):
                     self.imgs_gt[subfolder_name] = read_img_seq(img_paths_gt)
                     self.imgs_pm[subfolder_name] = read_img_seq(img_paths_pm)
                     self.imgs_hm[subfolder_name] = read_img_seq(img_paths_hm)
+                    self.imgs_fw[subfolder_name] = read_img_seq(img_paths_fw)
+                    self.imgs_bw[subfolder_name] = read_img_seq(img_paths_bw)
                 else:
                     self.imgs_lq[subfolder_name] = img_paths_lq
                     self.imgs_gt[subfolder_name] = img_paths_gt
                     self.imgs_pm[subfolder_name] = img_paths_pm
                     self.imgs_hm[subfolder_name] = img_paths_hm
+                    self.imgs_fw[subfolder_name] = img_paths_fw
+                    self.imgs_bw[subfolder_name] = img_paths_bw
         else:
             raise ValueError(f'Non-supported video test dataset: {type(opt["name"])}')
 
@@ -490,6 +508,7 @@ class VideoRecurrentTestDatasetlocal(VideoDeblurTestDataset):
                     "seq_index": list(range(0, d)),
                     "seq_from_folder": folder
                 }
+        self.scale_factor = opt['scale_factor']
 
     def __getitem__(self, index):
         # folder = self.folders[index]
@@ -501,28 +520,36 @@ class VideoRecurrentTestDatasetlocal(VideoDeblurTestDataset):
         gt_paths = [self.imgs_gt[folder][p] for p in selected_index]
         pm_paths = [self.imgs_pm[folder][p] for p in selected_index]
         hm_paths = [self.imgs_hm[folder][p] for p in selected_index]
+        fw_paths = [self.imgs_fw[folder][p] for p in selected_index]
+        bw_paths = [self.imgs_bw[folder][p] for p in selected_index]
 
         imgs_lq = read_img_seq(lq_paths)
         imgs_gt = read_img_seq(gt_paths)
         imgs_pm = read_img_seq(pm_paths)
         imgs_hm = read_img_seq(hm_paths)
+        imgs_fw = read_flo_seq(fw_paths)
+        imgs_bw = read_flo_seq(bw_paths)
 
         # resize the images,gts,pms to the same size with hms [720,1280]
         H, W = imgs_hm.shape[2], imgs_hm.shape[3]
         imgs_lq = torch.nn.functional.interpolate(imgs_lq, size=(H, W), mode='bilinear', align_corners=False)
         imgs_gt = torch.nn.functional.interpolate(imgs_gt, size=(H, W), mode='bilinear', align_corners=False)
         imgs_pm = torch.nn.functional.interpolate(imgs_pm, size=(H, W), mode='bilinear', align_corners=False)
-
-
+        imgs_fw = torch.nn.functional.interpolate(imgs_fw, size=(H // self.scale_factor, W // self.scale_factor),
+                                                  mode='bilinear', align_corners=False)
+        imgs_bw = torch.nn.functional.interpolate(imgs_bw, size=(H // self.scale_factor, W // self.scale_factor),
+                                                  mode='bilinear', align_corners=False)
         return {
-                'lq': imgs_lq,
-                'gt': imgs_gt,
-                'pm': imgs_pm,
-                'hm': imgs_hm,
-                'folder': folder,
-                'seq_name': seq_name,
-                'seq': selected_index
-            }
+            'lq': imgs_lq,
+            'gt': imgs_gt,
+            'pm': imgs_pm,
+            'hm': imgs_hm,
+            'fw': imgs_fw,
+            'bw': imgs_bw,
+            'folder': folder,
+            'seq_name': seq_name,
+            'seq': selected_index
+        }
 
     def __len__(self):
         return len(self.seq_names)

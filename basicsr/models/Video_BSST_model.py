@@ -107,8 +107,9 @@ class ModelBSST(BaseModel):
         if train_opt.get('pixel_opt'):
             self.cri_pix = build_loss(train_opt['pixel_opt']).to(self.device)
             self.log_dict['l_pix'] = AverageMeter()
-            self.log_dict['l_pix_weighted'] = AverageMeter()
-            # self.log_dict['l_flows'] = AverageMeter()
+            self.log_dict['l_pix_object'] = AverageMeter()
+            self.log_dict['l_pix_object_local_blur'] = AverageMeter()
+
         else:
             self.cri_pix = None
 
@@ -199,13 +200,13 @@ class ModelBSST(BaseModel):
         self.bw = bw.to(self.device)
 
     def feed_data_test(self, data):
-        lq, gt, pm, hm = data['lq'], data['gt'], data['pm'], data['hm'], data['fw'], data['bw']
+        lq, gt, pm, hm, fw, bw = data['lq'], data['gt'], data['pm'], data['hm'], data['fw'], data['bw']
         self.lq = lq.to(self.device).unsqueeze(0)
         self.gt = gt.to(self.device).unsqueeze(0)
         self.pm = pm.to(self.device).unsqueeze(0)
         self.hm = hm.to(self.device).unsqueeze(0)
-        self.fw = fw.to(self.device)
-        self.bw = bw.to(self.device)
+        self.fw = fw.to(self.device).unsqueeze(0)
+        self.bw = bw.to(self.device).unsqueeze(0)
 
     def optimize_parameters(self, current_iter):
         if self.fix_flow_iter:
@@ -229,13 +230,16 @@ class ModelBSST(BaseModel):
         loss_dict = OrderedDict()
 
         l_pix = self.cri_pix(output, self.gt)
-        l_pix_weighted = self.cri_pix(output, self.gt, focus=focus, weight=self.hm)
+        l_pix_object = self.cri_pix(output, self.gt, weight=self.hm)
+        l_pix_object_local_blur = self.cri_pix(output, self.gt, focus=focus, weight=self.hm)
 
         loss_dict['l_pix'] = l_pix
-        loss_dict['l_pix_weighted'] = l_pix_weighted
+        loss_dict['l_pix_object'] = l_pix_object
+        loss_dict['l_pix_object_local_blur'] = l_pix_object_local_blur
 
-        # Loss: L1 + L1_weighted + 0* Regularization
-        l_total = 0.01 * l_pix + l_pix_weighted + 0 * sum(p.sum() for p in self.net_g.parameters())
+        # Loss: 0.01 * l_pix + 0.1 * l_pix_object + l_pix_object_local_blur + 0* Regularization
+        l_total = 0.01 * l_pix + 0.1 * l_pix_object + l_pix_object_local_blur + 0 * sum(
+            p.sum() for p in self.net_g.parameters())
 
         # l_total.backward()
         self.scaler.scale(l_total).backward()
@@ -280,7 +284,11 @@ class ModelBSST(BaseModel):
                                          w_idx // 4:w_idx // 4 + size_patch_testing // 4]
                         flows_backwards = flows_backwards_all[..., (h_idx) // 4:h_idx // 4 + size_patch_testing // 4,
                                           w_idx // 4:w_idx // 4 + size_patch_testing // 4]
-                        out_patch, focus = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards)
+                        fw = self.fw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
+                             w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                        bw = self.bw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
+                             w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                        out_patch, focus = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards, fw, bw)
 
                     out_patch = out_patch.detach().cpu().reshape(b, t, c, size_patch_testing, size_patch_testing)
                     focus_patch = focus.detach().cpu().reshape(b, t, 1, size_patch_testing, size_patch_testing)
@@ -370,6 +378,8 @@ class ModelBSST(BaseModel):
             del self.output
             del self.gt
             del self.hm
+            del self.fw
+            del self.bw
             del self.focus
 
             if seq_index[0] == 52:

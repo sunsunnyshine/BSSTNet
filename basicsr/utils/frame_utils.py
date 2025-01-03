@@ -2,7 +2,6 @@ import numpy as np
 from PIL import Image
 from os.path import *
 import re
-
 import cv2
 cv2.setNumThreads(0)
 cv2.ocl.setUseOpenCL(False)
