@@ -244,7 +244,7 @@ class ModelBSST(BaseModel):
         # l_total.backward()
         self.scaler.scale(l_total).backward()
         self.scaler.unscale_(self.optimizer_g)
-        torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.001)
         self.scaler.step(self.optimizer_g)
         self.scaler.update()
 

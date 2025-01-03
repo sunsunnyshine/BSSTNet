@@ -318,7 +318,7 @@ class WindowAttention(nn.Module):
             attn = attn.view(B_ // nW, nW, self.num_heads, N, N) + mask[:, :N, :N].unsqueeze(1).unsqueeze(0)
             attn = attn.view(-1, self.num_heads, N, N)
 
-        attn = F.softmax(attn, -1, dtype=q.dtype)  # Don't use attn.dtype after addition!
+        attn = F.softmax(torch.clamp(attn, min=-1e20, max=1e20), -1, dtype=q.dtype)  # Don't use attn.dtype after addition!
         x = (attn @ v).transpose(1, 2).reshape(B_, N, C)
 
         return x
