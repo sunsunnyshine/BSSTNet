@@ -71,7 +71,7 @@ datasets:
     num_frame: 20
 
 path:
-  pretrain_network_g: model_zoos/BSST_dvd.pth
+  pretrain_network_g: model_zoos/BSST_vdv.pth
   strict_load_g: false
   resume_state: ~
 
