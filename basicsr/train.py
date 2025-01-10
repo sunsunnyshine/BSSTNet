@@ -179,6 +179,7 @@ def train_pipeline(root_path):
 
             model.validation(val_loader, current_iter, tb_logger, wandb_logger, opt['val']['save_img'])
             # pass
+
     for epoch in range(start_epoch, total_epochs + 1):
         train_sampler.set_epoch(epoch)
         prefetcher.reset()
