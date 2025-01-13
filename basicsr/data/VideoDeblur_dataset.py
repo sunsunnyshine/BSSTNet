@@ -190,29 +190,32 @@ class DeblurRecurrentDataset(data.Dataset):
                                                                                                img_gt_path)
 
         # augmentation - flip, rotate
-        len = img_gts.__len__()
-        img_lqs.extend(img_gts)
-        img_lqs.extend(img_pms)
-        img_lqs.extend(img_hms)
-        img_fws.extend(img_bws)
-        img_results, flow_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'], flows=img_fws)
+        if isinstance(img_gts, list):
+            len = img_gts.__len__()
+            img_lqs.extend(img_gts)
+            img_lqs.extend(img_pms)
+            img_lqs.extend(img_hms)
+            img_fws.extend(img_bws)
+            img_results, flow_results = augment(img_lqs, self.opt['use_hflip'], self.opt['use_rot'], flows=img_fws)
 
-        img_results = img2tensor(img_results)
-        img_lqs = torch.stack(img_results[:len], dim=0)
-        img_gts = torch.stack(img_results[len:2 * len], dim=0)
-        img_pms = torch.stack(img_results[2 * len:3 * len], dim=0)
-        img_hms = torch.stack(img_results[3 * len:], dim=0)
+            img_results = img2tensor(img_results)
+            img_lqs = torch.stack(img_results[:len], dim=0)
+            img_gts = torch.stack(img_results[len:2 * len], dim=0)
+            img_pms = torch.stack(img_results[2 * len:3 * len], dim=0)
+            img_hms = torch.stack(img_results[3 * len:], dim=0)
 
-        flow_results = img2tensor(flow_results, bgr2rgb=False, float32=True)
-        img_fws = torch.stack(flow_results[:len], dim=0)
-        img_bws = torch.stack(flow_results[len:], dim=0)
+            flow_results = img2tensor(flow_results, bgr2rgb=False, float32=True)
+            img_fws = torch.stack(flow_results[:len], dim=0)
+            img_bws = torch.stack(flow_results[len:], dim=0)
 
-        # img_lqs: (t, c, h, w)
-        # img_gts: (t, c, h, w)
-        # key: str
-        # return {'lq': img_lqs, 'gt': img_gts, 'key': key}
-        return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms, 'hm': img_hms, 'fw': img_fws, 'bw': img_bws,
-                'folder': [f"{clip_name}.{neighbor_list[0]}", f"{clip_name}.{neighbor_list[1]}"]}
+            return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms, 'hm': img_hms, 'fw': img_fws, 'bw': img_bws,
+                    'folder': [f"{clip_name}.{neighbor_list[0]}", f"{clip_name}.{neighbor_list[1]}"]}
+        else:
+            augment_list = [img_lqs, img_gts, img_hms]
+            augment_list = augment(augment_list, self.opt['use_hflip'], self.opt['use_rot'])
+            img_lqs, img_gts, img_hms = img2tensor(augment_list)
+            return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms, 'hm': img_hms, 'fw': img_fws, 'bw': img_bws,
+                    'folder': [f"{clip_name}.{neighbor_list[0]}"]}
 
     def __len__(self):
         return len(self.data_infos) * 10000

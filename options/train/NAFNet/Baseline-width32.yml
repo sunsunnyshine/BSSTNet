@@ -1,0 +1,136 @@
+# ------------------------------------------------------------------------
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
+# ------------------------------------------------------------------------
+# Modified from BasicSR (https://github.com/xinntao/BasicSR)
+# Copyright 2018-2020 BasicSR Authors
+# ------------------------------------------------------------------------
+# general settings
+name: vdv_NAFNet_baseline
+model_type: ImageRestorationModel
+scale: 1
+num_gpu: 1
+manual_seed: 42
+reload: true
+retrain: False
+datasets:
+  train:
+    name: VideoDeblur
+    type: DeblurRecurrentDataset
+    dataroot_gt: ./datasets/VDV/train/GT
+    dataroot_lq: ./datasets/VDV/train/blur
+    dataroot_pm: ./datasets/VDV/train/PredictMask
+    dataroot_hm: ./datasets/VDV/train/HardMask
+    dataroot_fw_residual: ./datasets/VDV/train/fw_residual
+    dataroot_bw_residual: ./datasets/VDV/train/bw_residual
+
+    meta_info_file: basicsr/data/meta_info/VDV_train.txt
+    val_partition: ~
+    test_mode: False
+    io_backend:
+      type: disk
+    file_end: png
+    cache_data: false
+
+    num_frame: 1  # single img
+    scale: 1
+    gt_size: 256
+    interval_list: [1]
+    random_reverse: false
+    use_hflip: True
+    use_rot: false
+    force_blur_region_p: 0.99
+
+    # data loader
+    num_worker_per_gpu: 2
+    batch_size_per_gpu: 20
+    dataset_enlarge_ratio: 100
+    prefetch_mode: ~
+
+  val:
+    name: vdv
+    type: VideoRecurrentTestDatasetlocal
+    dataroot_gt: ./datasets/VDV/test/GT
+    dataroot_lq: ./datasets/VDV/test/blur
+    dataroot_pm: ./datasets/VDV/test/PredictMask
+    dataroot_hm: ./datasets/VDV/test/HardMask
+    dataroot_fw_residual: ./datasets/VDV/test/fw_residual
+    dataroot_bw_residual: ./datasets/VDV/test/bw_residual
+    scale_factor: 4
+
+    cache_data: false
+    io_backend:
+      type: disk
+
+    num_frame: 1
+
+network_g:
+  type: BaselineLocal
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+  dw_expand: 1
+  ffn_expand: 2
+
+# path
+path:
+  pretrain_network_g: model_zoos/NAFNet-GoPro-width32.pth
+  strict_load_g: false
+  resume_state: ~
+
+# training settings
+train:
+  optim_g:
+    type: Adam
+    lr: !!float 1e-4
+    weight_decay: 0
+    betas: [0.9, 0.99]
+
+  scheduler:
+    type: TrueCosineAnnealingLR
+    T_max: 50000
+    eta_min: !!float 1e-7
+
+  total_iter: 40000
+  warmup_iter: 1000 # no warm up
+
+  # losses
+  pixel_opt:
+    type: L1Loss
+    loss_weight: 1
+    reduction: mean
+
+# validation settings
+val:
+  val_freq: 100
+  save_img: false
+
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: ssim_calculate
+    weighted_psnr:
+      type: calculate_weighted_psnr
+      crop_border: 0
+      test_y_channel: false
+    weighted_ssim:
+        type: weighted_ssim_calculate
+
+# logging settings
+logger:
+  print_freq: 10
+  save_checkpoint_freq: 2500
+  use_tb_logger: true
+  show_tf_imgs_freq: 500
+  wandb:
+    project: ~
+    resume_id: ~
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500
