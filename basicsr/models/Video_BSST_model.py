@@ -19,8 +19,8 @@ from basicsr.utils.registry import MODEL_REGISTRY
 from basicsr.utils.logger import AverageMeter
 from basicsr.archs.RAFT.raft import RAFT
 from basicsr.archs.RAFT.utils.utils import InputPadder
-import math
-
+import os
+import cv2
 
 def get_dist_info():
     if dist.is_available():
@@ -330,7 +330,7 @@ class ModelBSST(BaseModel):
         self.focus = focus_output[:, :, :, :, :]
         self.net_g.train()
 
-    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False):
+    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False, save_img_path=None):
         """Validation function.
         Args:
             dataloader (torch.utils.data.DataLoader): Validation dataloader.
@@ -341,13 +341,13 @@ class ModelBSST(BaseModel):
         """
         if self.opt['dist']:
             self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
-                                 use_image=True)
+                                 use_image=True, save_img_path=save_img_path)
         else:
             self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
-                                 use_image=True)
+                                 use_image=True, save_img_path=save_img_path)
 
     def dist_validation(self, dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
-                        use_image=True):
+                        use_image=True, save_img_path=None):
         dataset = dataloader.dataset
         dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
@@ -408,11 +408,18 @@ class ModelBSST(BaseModel):
                 visuals['hm'] = visuals['hm'][:, 2:-2, ...]
                 visuals['focus'] = visuals['focus'][:, 2:-2, ...]
             torch.cuda.empty_cache()
+            if save_img:
+                save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
+                if not os.path.exists(save_img_path_scene):
+                    os.makedirs(save_img_path_scene)
             if i < num_seq:
-                for idx in range(visuals['result'].size(1)):
+                for idx in range(visuals['lq'].size(1)):
                     result = visuals['result'][0, idx, :, :, :]
                     result_img = tensor2img([result])  # uint8, bgr
                     metric_data['img'] = result_img
+                    if save_img:
+                        whole_idx = int(folder.split('_')[-1]) + idx
+                        cv2.imwrite(os.path.join(save_img_path_scene, f'{whole_idx:05d}.png'), result_img)
                     if 'gt' in visuals:
                         gt = visuals['gt'][0, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr
@@ -420,7 +427,7 @@ class ModelBSST(BaseModel):
                     if 'hm' in visuals and 'focus' in visuals:
                         hm = visuals['hm'][0, idx, :, :, :]
                         focus = visuals['focus'][0, idx, :, :, :]
-                        focus_mask = tensor2img([focus * hm])
+                        focus_mask = tensor2img([hm])
                         metric_data['mask'] = focus_mask
 
                     if with_metrics:

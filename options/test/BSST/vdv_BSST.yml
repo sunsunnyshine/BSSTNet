@@ -5,7 +5,7 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: vdv_BSST_20250103_02_debug
+name: vdv_test
 model_type: ModelBSST
 manual_seed: 0
 num_gpu: auto
@@ -19,40 +19,6 @@ network_g:
   type: BSST
   max_flow: 10.0
 datasets:
-  train:
-    name: VideoDeblur
-    type: DeblurRecurrentDataset
-    dataroot_gt: ./datasets/VDV/train/GT
-    dataroot_lq: ./datasets/VDV/train/blur
-    dataroot_pm: ./datasets/VDV/train/PredictMask
-    dataroot_hm: ./datasets/VDV/train/HardMask
-    dataroot_fw_residual: ./datasets/VDV/train/fw_residual
-    dataroot_bw_residual: ./datasets/VDV/train/bw_residual
-
-    meta_info_file: basicsr/data/meta_info/VDV_train.txt
-    val_partition: ~
-    test_mode: False
-    io_backend:
-      type: disk
-    file_end: png
-    cache_data: false
-
-    num_frame: 10
-    scale: 1
-    gt_size: 256
-    interval_list: [2]
-    random_reverse: false
-    use_hflip: True
-    use_rot: false
-    force_blur_region_p: 0.99
-
-    # data loader
-    num_worker_per_gpu: 2
-    batch_size_per_gpu: 1
-    dataset_enlarge_ratio: 100
-    prefetch_mode: ~
-    
-
   val:
     name: vdv
     type: VideoRecurrentTestDatasetlocal
@@ -72,35 +38,11 @@ datasets:
 
 path:
   pretrain_network_g: model_zoos/BSST_vdv2.pth
-  strict_load_g: false
-  resume_state: ~
-
-train:
-  optim_g:
-    type: Adam
-    lr: !!float 1e-4
-    weight_decay: 0
-    betas: [0.9, 0.99]
-
-  scheduler:
-    type: TrueCosineAnnealingLR
-    T_max: 20000
-    eta_min: !!float 1e-7
-
-  total_iter: 20000
-  warmup_iter: 1000 # no warm up
-  fix_flow: 10000
-
-  # losses
-  pixel_opt:
-    type: L1Loss
-    loss_weight: 1
-    reduction: mean
-
+  strict_load_g: true
 # validation settings
 val:
-  val_freq: 1000
-  save_img: false
+  val_freq: !!float 2500
+  save_img: true
   crop_size: 256
   max_minibatch: 1
 
@@ -117,19 +59,6 @@ val:
       test_y_channel: false
     weighted_ssim:
         type: weighted_ssim_calculate
-    
-# logging settings
-logger:
-  print_freq: 10
-  save_checkpoint_freq: 2500
-  use_tb_logger: true
-  show_tf_imgs_freq: 500
-  wandb:
-    project: ~
-    resume_id: ~
-    wandb_name: ~
-
-
 # dist training settings
 dist_params:
   backend: nccl
