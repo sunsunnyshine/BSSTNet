@@ -229,21 +229,50 @@ class ImageRestorationModel(BaseModel):
     def test(self):
         self.net_g.eval()
         with torch.no_grad():
-            n = len(self.lq)
-            outs = []
-            m = self.opt['val'].get('max_minibatch', n)
-            i = 0
-            while i < n:
-                j = i + m
-                if j >= n:
-                    j = n
-                pred = self.net_g(self.lq[i:j])
-                if isinstance(pred, list):
-                    pred = pred[-1]
-                outs.append(pred.detach().cpu())
-                i = j
+            self.output = self.net_g(self.lq)
+        self.net_g.train()
 
-            self.output = torch.cat(outs, dim=0)
+    def test_by_patch(self):
+        self.net_g.eval()
+        lq = self.lq
+
+        with torch.no_grad():
+            size_patch_testing = 256
+            overlap_size = 64
+            b, c, h, w = lq.shape
+            stride = size_patch_testing - overlap_size
+            h_idx_list = list(range(0, h - size_patch_testing, stride)) + [max(0, h - size_patch_testing)]
+            w_idx_list = list(range(0, w - size_patch_testing, stride)) + [max(0, w - size_patch_testing)]
+            E = torch.zeros(b, c, h, w)
+            W = torch.zeros_like(E)
+            for h_idx in h_idx_list:
+                for w_idx in w_idx_list:
+                    with torch.cuda.amp.autocast():
+                        in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                        out_patch = self.net_g(in_patch)
+
+                    out_patch = out_patch.detach().cpu().reshape(b, c, size_patch_testing, size_patch_testing)
+                    out_patch_mask = torch.ones_like(out_patch)
+
+                    if True:
+                        if h_idx < h_idx_list[-1]:
+                            out_patch[..., -overlap_size // 2:, :] *= 0
+                            out_patch_mask[..., -overlap_size // 2:, :] *= 0
+                        if w_idx < w_idx_list[-1]:
+                            out_patch[..., :, -overlap_size // 2:] *= 0
+                            out_patch_mask[..., :, -overlap_size // 2:] *= 0
+                        if h_idx > h_idx_list[0]:
+                            out_patch[..., :overlap_size // 2, :] *= 0
+                            out_patch_mask[..., :overlap_size // 2, :] *= 0
+                        if w_idx > w_idx_list[0]:
+                            out_patch[..., :, :overlap_size // 2] *= 0
+                            out_patch_mask[..., :, :overlap_size // 2] *= 0
+
+                    E[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(out_patch)
+                    W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(out_patch_mask)
+
+            output = E.div_(W)
+        self.output = output[:, :, :, :]
         self.net_g.train()
 
     def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image=False):
@@ -270,13 +299,9 @@ class ImageRestorationModel(BaseModel):
             folder = val_data["seq_name"]
             seq_index = val_data["seq"]
             self.feed_data(val_data)
-            self.test()
+            self.test_by_patch()
 
             visuals = self.get_current_visuals()
-            sr_img = tensor2img([visuals['result']], rgb2bgr=rgb2bgr)
-            if 'gt' in visuals:
-                gt_img = tensor2img([visuals['gt']], rgb2bgr=rgb2bgr)
-                del self.gt
 
             # tentative for out of GPU memory
             del self.lq
@@ -308,9 +333,6 @@ class ImageRestorationModel(BaseModel):
                     pbar.set_description(f'Folder: {folder}')
         if rank == 0:
             pbar.close()
-
-        # current_metric = 0.
-        collected_metrics = OrderedDict()
         if with_metrics:
             if self.opt['dist']:
 

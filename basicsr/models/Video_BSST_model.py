@@ -402,11 +402,7 @@ class ModelBSST(BaseModel):
                 visuals['hm'] = visuals['hm'][:, 17:-2, ...]
                 visuals['focus'] = visuals['focus'][:, 17:-2, ...]
             else:
-                visuals['lq'] = visuals['lq'][:, 2:-2, ...]
-                visuals['result'] = visuals['result'][:, 2:-2, ...]
-                visuals['gt'] = visuals['gt'][:, 2:-2, ...]
-                visuals['hm'] = visuals['hm'][:, 2:-2, ...]
-                visuals['focus'] = visuals['focus'][:, 2:-2, ...]
+               pass
             torch.cuda.empty_cache()
             if save_img:
                 save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
