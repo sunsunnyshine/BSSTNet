@@ -212,8 +212,12 @@ class DeblurRecurrentDataset(data.Dataset):
                     'folder': [f"{clip_name}.{neighbor_list[0]}", f"{clip_name}.{neighbor_list[1]}"]}
         else:
             augment_list = [img_lqs, img_gts, img_hms, img_pms]
-            augment_list = augment(augment_list, self.opt['use_hflip'], self.opt['use_rot'])
+            augment_flow_list = [img_fws, img_bws]
+            augment_list, flow_results = augment(augment_list, self.opt['use_hflip'], self.opt['use_rot'],
+                                                 flows=augment_flow_list)
             img_lqs, img_gts, img_hms, img_pms = img2tensor(augment_list)
+            img_fws, img_bws = img2tensor(flow_results, bgr2rgb=False, float32=True)
+
             return {'lq': img_lqs, 'gt': img_gts, 'pm': img_pms, 'hm': img_hms, 'fw': img_fws, 'bw': img_bws,
                     'folder': [f"{clip_name}.{neighbor_list[0]}"]}
 

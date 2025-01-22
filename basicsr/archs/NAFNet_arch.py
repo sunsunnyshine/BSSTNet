@@ -140,7 +140,7 @@ class NAFNet(nn.Module):
 
         self.padder_size = 2 ** len(self.encoders)
 
-    def forward(self, inp, pm=None):
+    def forward(self, inp, fw_residual=None, bw_residual=None):
         B, C, H, W = inp.shape
         inp = self.check_image_size(inp)
 
@@ -162,8 +162,15 @@ class NAFNet(nn.Module):
 
         x = self.ending(x)
         # only fix the foreground part
-        if pm is not None:
-            x = x * pm + inp
+        if fw_residual is not None and bw_residual is not None:
+            max_flow = 10
+            target_blur_map = 0.5 * torch.clamp(torch.norm(fw_residual, p=2, dim=1, keepdim=True), min=0,
+                                                max=max_flow) / max_flow \
+                              + 0.5 * torch.clamp(torch.norm(bw_residual, p=2, dim=1, keepdim=True), min=0,
+                                                  max=max_flow) / max_flow
+            # resize target_blur_map
+            target_blur_map = F.interpolate(target_blur_map, size=inp.shape[-2:], mode='bilinear', align_corners=False)
+            x = x * target_blur_map + inp
         else:
             x = x + inp
 

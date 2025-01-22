@@ -198,7 +198,7 @@ class ImageRestorationModel(BaseModel):
         if self.opt['train'].get('mixup', False):
             self.mixup_aug()
 
-        preds = self.net_g(self.lq, self.pm)
+        preds = self.net_g(self.lq, self.fw, self.bw)
         if not isinstance(preds, list):
             preds = [preds]
 
@@ -229,13 +229,15 @@ class ImageRestorationModel(BaseModel):
     def test(self):
         self.net_g.eval()
         with torch.no_grad():
-            self.output = self.net_g(self.lq,self.pm)
+            self.output = self.net_g(self.lq, self.pm)
         self.net_g.train()
 
     def test_by_patch(self):
         self.net_g.eval()
         lq = self.lq
-        pm = self.pm
+        fw = self.fw
+        bw = self.bw
+
         with torch.no_grad():
             size_patch_testing = 256
             overlap_size = 64
@@ -249,8 +251,9 @@ class ImageRestorationModel(BaseModel):
                 for w_idx in w_idx_list:
                     with torch.cuda.amp.autocast():
                         in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        pm_patch = pm[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        out_patch = self.net_g(in_patch, pm_patch)
+                        fw_patch = fw[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                        bw_patch = bw[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                        out_patch = self.net_g(in_patch, fw_patch, bw_patch)
 
                     out_patch = out_patch.detach().cpu().reshape(b, c, size_patch_testing, size_patch_testing)
                     out_patch_mask = torch.ones_like(out_patch)
