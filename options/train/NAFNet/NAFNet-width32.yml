@@ -5,7 +5,7 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: vdv_NAFNet
+name: vdv_NAFNet_Focus
 model_type: ImageRestorationModel
 scale: 1
 num_gpu: 1
@@ -72,7 +72,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: ~
+  pretrain_network_g: experiments/vdv_NAFNet/models/net_g_latest.pth
   strict_load_g: True
   resume_state: ~
 
