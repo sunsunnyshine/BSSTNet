@@ -213,7 +213,7 @@ class ImageRestorationModel(BaseModel):
         loss_dict['l_pix_object'] = l_pix_object
 
         # Loss: 0.01 * l_pix + 0.1 * l_pix_object + l_pix_object_local_blur + 0* Regularization
-        l_total = 0.01 * l_pix + 0.1 * l_pix_object + 0 * sum(
+        l_total = 0.1 * l_pix + l_pix_object + 0 * sum(
             p.sum() for p in self.net_g.parameters())
 
         # l_total.backward()
@@ -251,9 +251,11 @@ class ImageRestorationModel(BaseModel):
                 for w_idx in w_idx_list:
                     with torch.cuda.amp.autocast():
                         in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        fw_patch = fw[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        bw_patch = bw[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        out_patch = self.net_g(in_patch, fw_patch, bw_patch)
+                        fw = self.fw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
+                             w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                        bw = self.bw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
+                             w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                        out_patch = self.net_g(in_patch, fw, bw)
 
                     out_patch = out_patch.detach().cpu().reshape(b, c, size_patch_testing, size_patch_testing)
                     out_patch_mask = torch.ones_like(out_patch)
