@@ -4,6 +4,9 @@
 # Modified from BasicSR (https://github.com/xinntao/BasicSR)
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
+import os
+
+import cv2
 import torch
 from torch import distributed as dist
 from collections import OrderedDict
@@ -211,11 +214,10 @@ class ImageRestorationModel1(BaseModel):
             focus_W = torch.zeros_like(focus_E)
             for h_idx in h_idx_list:
                 for w_idx in w_idx_list:
-                    with torch.cuda.amp.autocast():
-                        in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        pm_patch = self.pm[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                    in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                    pm_patch = self.pm[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
 
-                        out_patch = self.net_g(in_patch)
+                    out_patch = self.net_g(in_patch)
 
                     out_patch = out_patch.detach().cpu().reshape(b, t, c, size_patch_testing, size_patch_testing)
                     out_patch_mask = torch.ones_like(out_patch)
@@ -241,7 +243,7 @@ class ImageRestorationModel1(BaseModel):
         self.output = output[:, :, :, :, :]
         self.net_g.train()
 
-    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False):
+    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False,save_img_path=None):
         """Validation function.
         Args:
             dataloader (torch.utils.data.DataLoader): Validation dataloader.
@@ -252,13 +254,13 @@ class ImageRestorationModel1(BaseModel):
         """
         if self.opt['dist']:
             self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
-                                 use_image=True)
+                                 use_image=True, save_img_path=save_img_path)
         else:
             self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
-                                 use_image=True)
+                                 use_image=True, save_img_path=save_img_path)
 
     def dist_validation(self, dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
-                        use_image=True):
+                        use_image=True, save_img_path=None):
         dataset = dataloader.dataset
         dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
@@ -291,34 +293,19 @@ class ImageRestorationModel1(BaseModel):
             del self.hm
             del self.fw
             del self.bw
-
-            if seq_index[0] == 52:
-                # print(True)
-                visuals['lq'] = visuals['lq'][:, -10:-2, ...]
-                visuals['result'] = visuals['result'][:, -10:-2, ...]
-                visuals['gt'] = visuals['gt'][:, -10:-2, ...]
-                visuals['hm'] = visuals['hm'][:, -10:-2, ...]
-            elif seq_index[0] == 86:
-                visuals['lq'] = visuals['lq'][:, 4:-2, ...]
-                visuals['result'] = visuals['result'][:, 4:-2, ...]
-                visuals['gt'] = visuals['gt'][:, 4:-2, ...]
-                visuals['hm'] = visuals['hm'][:, 4:-2, ...]
-            elif seq_index[0] == 29:
-                visuals['lq'] = visuals['lq'][:, 17:-2, ...]
-                visuals['result'] = visuals['result'][:, 17:-2, ...]
-                visuals['gt'] = visuals['gt'][:, 17:-2, ...]
-                visuals['hm'] = visuals['hm'][:, 17:-2, ...]
-            else:
-                visuals['lq'] = visuals['lq'][:, 2:-2, ...]
-                visuals['result'] = visuals['result'][:, 2:-2, ...]
-                visuals['gt'] = visuals['gt'][:, 2:-2, ...]
-                visuals['hm'] = visuals['hm'][:, 2:-2, ...]
             torch.cuda.empty_cache()
+            if save_img:
+                save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
+                if not os.path.exists(save_img_path_scene):
+                    os.makedirs(save_img_path_scene)
             if i < num_seq:
                 for idx in range(visuals['result'].size(1)):
                     result = visuals['result'][0, idx, :, :, :]
                     result_img = tensor2img([result])  # uint8, bgr
                     metric_data['img'] = result_img
+                    if save_img:
+                        whole_idx = int(folder.split('_')[-1]) + idx
+                        cv2.imwrite(os.path.join(save_img_path_scene, f'{whole_idx:05d}.png'), result_img)
                     if 'gt' in visuals:
                         gt = visuals['gt'][0, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr
@@ -393,7 +380,7 @@ class ImageRestorationModel1(BaseModel):
 
     def get_current_visuals(self):
         out_dict = OrderedDict()
-        out_dict['lq'] = self.lq[:,1:-1,...].detach().cpu()
+        out_dict['lq'] = self.lq[:, 1:-1 ,...].detach().cpu()
         out_dict['result'] = self.output.detach().cpu()
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()

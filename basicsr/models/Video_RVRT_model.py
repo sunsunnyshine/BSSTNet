@@ -351,7 +351,7 @@ class ModelRVRT(BaseModel):
                         gt = visuals['gt'][0, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr
                         metric_data['img2'] = gt_img
-                    if 'hm' in visuals and 'focus' in visuals:
+                    if 'hm' in visuals:
                         hm = visuals['hm'][0, idx, :, :, :]
                         focus_mask = tensor2img([hm])
                         metric_data['mask'] = focus_mask

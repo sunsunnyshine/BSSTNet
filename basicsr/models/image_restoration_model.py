@@ -5,6 +5,9 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 import importlib
+import os
+
+import cv2
 import torch
 from torch import distributed as dist
 from collections import OrderedDict
@@ -275,7 +278,7 @@ class ImageRestorationModel(BaseModel):
         self.output = output[:, :, :, :]
         self.net_g.train()
 
-    def dist_validation(self, dataloader, current_iter, tb_logger, save_img, rgb2bgr, use_image=False):
+    def dist_validation(self, dataloader, current_iter, tb_logger, save_img, save_img_path=None):
         dataset = dataloader.dataset
         dataset_name = dataloader.dataset.opt['name']
         with_metrics = self.opt['val'].get('metrics') is not None
@@ -307,12 +310,18 @@ class ImageRestorationModel(BaseModel):
             del self.lq
             del self.output
             torch.cuda.empty_cache()
-
+            if save_img:
+                save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
+                if not os.path.exists(save_img_path_scene):
+                    os.makedirs(save_img_path_scene)
             if i < num_seq:
                 for idx in range(visuals['lq'].size(1)):
                     result = visuals['result'][:, idx, :, :, :]
                     result_img = tensor2img([result])  # uint8, bgr
                     metric_data['img'] = result_img
+                    if save_img:
+                        whole_idx = int(folder.split('_')[-1]) + idx
+                        cv2.imwrite(os.path.join(save_img_path_scene, f'{whole_idx:05d}.png'), result_img)
                     if 'gt' in visuals:
                         gt = visuals['gt'][:, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr

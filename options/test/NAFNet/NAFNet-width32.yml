@@ -1,24 +1,19 @@
 # ------------------------------------------------------------------------
-# Copyright (c) 2021 megvii-model. All Rights Reserved.
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
 # ------------------------------------------------------------------------
 # Modified from BasicSR (https://github.com/xinntao/BasicSR)
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 # general settings
-name: vdv_BSST_test
-model_type: ModelBSST
-manual_seed: 0
-num_gpu: auto
+name: vdv_NAFNet_test
+model_type: ImageRestorationModel
+scale: 1
+num_gpu: 1
+manual_seed: 42
 reload: true
 retrain: False
-flowrefine_ratio: 0.25
-offset_ratio: 0.25
-softconv_ratio: 0.5
-no_fix_flow: true
-network_g:
-  type: BSST
-  max_flow: 10.0
 datasets:
+
   val:
     name: vdv
     type: VideoRecurrentTestDatasetlocal
@@ -34,17 +29,27 @@ datasets:
     io_backend:
       type: disk
 
-    num_frame: 20
+    num_frame: 1
 
+network_g:
+  type: NAFNetLocal
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+
+# path
 path:
-  pretrain_network_g: model_zoos/BSST_vdv2.pth
-  strict_load_g: true
+  pretrain_network_g: experiments/vdv_NAFNet_baseline/models/net_g_latest.pth
+  strict_load_g: True
+  resume_state: ~
+
+
 # validation settings
 val:
-  val_freq: !!float 2500
+  val_freq: 500
   save_img: true
-  crop_size: 256
-  max_minibatch: 1
+
 
   metrics:
     psnr: # metric name, can be arbitrary
@@ -59,8 +64,8 @@ val:
       test_y_channel: false
     weighted_ssim:
         type: weighted_ssim_calculate
+
 # dist training settings
 dist_params:
   backend: nccl
-  port: 29510
-find_unused_parameters: True
+  port: 29500

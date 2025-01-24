@@ -33,7 +33,7 @@ class BaseModel():
         """Save networks and training state."""
         pass
 
-    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None,save_img=False):
+    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False, save_img_path=None):
         """Validation function.
         Args:
             dataloader (torch.utils.data.DataLoader): Validation dataloader.
@@ -43,9 +43,9 @@ class BaseModel():
             save_img (bool): Whether to save images. Default: False.
         """
         if self.opt['dist']:
-            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img)
+            self.dist_validation(dataloader, current_iter, tb_logger, save_img=save_img, save_img_path=save_img_path)
         else:
-            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img)
+            self.dist_validation(dataloader, current_iter, tb_logger, save_img=save_img, save_img_path=save_img_path)
 
     def _initialize_best_metric_results(self, dataset_name):
         """Initialize the best metric results dict for recording the best metric value and iteration."""
@@ -82,7 +82,7 @@ class BaseModel():
             net_g_ema_params[k].data.mul_(decay).add_(net_g_params[k].data, alpha=1 - decay)
 
     def get_current_log(self):
-        log_dict_avg = {k:v.avg for k,v in self.log_dict.items()}
+        log_dict_avg = {k: v.avg for k, v in self.log_dict.items()}
         for k in self.log_dict.keys():
             self.log_dict[k].reset()
         return log_dict_avg
@@ -97,7 +97,8 @@ class BaseModel():
         if self.opt['dist']:
             find_unused_parameters = self.opt.get('find_unused_parameters', False)
             net = DistributedDataParallel(
-                net, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters,static_graph=True)
+                net, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters,
+                static_graph=True)
         elif self.opt['num_gpu'] > 1:
             net = DataParallel(net)
         return net
@@ -201,11 +202,9 @@ class BaseModel():
             # currently only support linearly warm up
             warm_up_lr_l = []
             for init_lr_g in init_lr_g_l:
-                warm_up_lr_l.append([v / warmup_iter * current_iter  for v in init_lr_g])
+                warm_up_lr_l.append([v / warmup_iter * current_iter for v in init_lr_g])
             # set learning rate
             self._set_lr(warm_up_lr_l)
-
-
 
     def get_current_learning_rate(self):
         return [param_group['lr'] for param_group in self.optimizers[0].param_groups]
@@ -365,8 +364,6 @@ class BaseModel():
             self.optimizers[i].load_state_dict(o)
         for i, s in enumerate(resume_schedulers):
             self.schedulers[i].load_state_dict(s)
-            
-            
 
     def reduce_loss_dict(self, loss_dict):
         """reduce loss dict.

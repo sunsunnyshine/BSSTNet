@@ -277,18 +277,18 @@ class ModelBSST(BaseModel):
             focus_W = torch.zeros_like(focus_E)
             for h_idx in h_idx_list:
                 for w_idx in w_idx_list:
-                    with torch.cuda.amp.autocast():
-                        in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        pm_patch = self.pm[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
-                        flows_forwards = flows_forwards_all[..., (h_idx) // 4:h_idx // 4 + size_patch_testing // 4,
-                                         w_idx // 4:w_idx // 4 + size_patch_testing // 4]
-                        flows_backwards = flows_backwards_all[..., (h_idx) // 4:h_idx // 4 + size_patch_testing // 4,
-                                          w_idx // 4:w_idx // 4 + size_patch_testing // 4]
-                        fw = self.fw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
-                             w_idx // 4:w_idx // 4 + size_patch_testing // 4]
-                        bw = self.bw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
-                             w_idx // 4:w_idx // 4 + size_patch_testing // 4]
-                        out_patch, focus = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards, fw, bw)
+
+                    in_patch = lq[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                    pm_patch = self.pm[..., h_idx:h_idx + size_patch_testing, w_idx:w_idx + size_patch_testing]
+                    flows_forwards = flows_forwards_all[..., (h_idx) // 4:h_idx // 4 + size_patch_testing // 4,
+                                     w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                    flows_backwards = flows_backwards_all[..., (h_idx) // 4:h_idx // 4 + size_patch_testing // 4,
+                                      w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                    fw = self.fw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
+                         w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                    bw = self.bw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
+                         w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                    out_patch, focus = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards, fw, bw)
 
                     out_patch = out_patch.detach().cpu().reshape(b, t, c, size_patch_testing, size_patch_testing)
                     focus_patch = focus.detach().cpu().reshape(b, t, 1, size_patch_testing, size_patch_testing)
@@ -369,7 +369,6 @@ class ModelBSST(BaseModel):
             # print(idx_data)
             val_data = dataset[idx_data]
             folder = val_data["seq_name"]
-            seq_index = val_data["seq"]
             self.feed_data_test(val_data)
             self.test_by_patch()
 
@@ -382,27 +381,6 @@ class ModelBSST(BaseModel):
             del self.bw
             del self.focus
 
-            if seq_index[0] == 52:
-                # print(True)
-                visuals['lq'] = visuals['lq'][:, -10:-2, ...]
-                visuals['result'] = visuals['result'][:, -10:-2, ...]
-                visuals['gt'] = visuals['gt'][:, -10:-2, ...]
-                visuals['hm'] = visuals['hm'][:, -10:-2, ...]
-                visuals['focus'] = visuals['focus'][:, -10:-2, ...]
-            elif seq_index[0] == 86:
-                visuals['lq'] = visuals['lq'][:, 4:-2, ...]
-                visuals['result'] = visuals['result'][:, 4:-2, ...]
-                visuals['gt'] = visuals['gt'][:, 4:-2, ...]
-                visuals['hm'] = visuals['hm'][:, 4:-2, ...]
-                visuals['focus'] = visuals['focus'][:, 4:-2, ...]
-            elif seq_index[0] == 29:
-                visuals['lq'] = visuals['lq'][:, 17:-2, ...]
-                visuals['result'] = visuals['result'][:, 17:-2, ...]
-                visuals['gt'] = visuals['gt'][:, 17:-2, ...]
-                visuals['hm'] = visuals['hm'][:, 17:-2, ...]
-                visuals['focus'] = visuals['focus'][:, 17:-2, ...]
-            else:
-               pass
             torch.cuda.empty_cache()
             if save_img:
                 save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
