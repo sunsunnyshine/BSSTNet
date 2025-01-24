@@ -1,0 +1,74 @@
+# ------------------------------------------------------------------------
+# Copyright (c) 2022 megvii-model. All Rights Reserved.
+# ------------------------------------------------------------------------
+# Modified from BasicSR (https://github.com/xinntao/BasicSR)
+# Copyright 2018-2020 BasicSR Authors
+# ------------------------------------------------------------------------
+# general settings
+name: vdv_NAFNet_Focus_test
+model_type: ImageRestorationModel
+scale: 1
+num_gpu: 1
+manual_seed: 42
+reload: true
+retrain: False
+datasets:
+
+  val:
+    name: vdv
+    type: VideoRecurrentTestDatasetlocal
+    dataroot_gt: ./datasets/VDV/test/GT
+    dataroot_lq: ./datasets/VDV/test/blur
+    dataroot_pm: ./datasets/VDV/test/PredictMask
+    dataroot_hm: ./datasets/VDV/test/HardMask
+    dataroot_fw_residual: ./datasets/VDV/test/fw_residual
+    dataroot_bw_residual: ./datasets/VDV/test/bw_residual
+    scale_factor: 4
+
+    cache_data: false
+    io_backend:
+      type: disk
+
+    num_frame: 1
+
+network_g:
+  type: NAFNetLocal
+  width: 32
+  enc_blk_nums: [1, 1, 1, 28]
+  middle_blk_num: 1
+  dec_blk_nums: [1, 1, 1, 1]
+
+# path
+path:
+  pretrain_network_g: experiments/vdv_NAFNet_Focus/models/net_g_latest.pth
+  strict_load_g: True
+  resume_state: ~
+
+
+
+# validation settings
+val:
+  val_freq: 500
+  save_img: true
+
+
+  metrics:
+    psnr: # metric name, can be arbitrary
+      type: calculate_psnr
+      crop_border: 0
+      test_y_channel: false
+    ssim:
+      type: ssim_calculate
+    weighted_psnr:
+      type: calculate_weighted_psnr
+      crop_border: 0
+      test_y_channel: false
+    weighted_ssim:
+        type: weighted_ssim_calculate
+
+
+
+# dist training settings
+dist_params:
+  backend: nccl
+  port: 29500

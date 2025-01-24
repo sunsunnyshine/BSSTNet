@@ -33,7 +33,7 @@ class BaseModel():
         """Save networks and training state."""
         pass
 
-    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None,save_img=False):
+    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None,save_img=False,save_img_path=None):
         """Validation function.
         Args:
             dataloader (torch.utils.data.DataLoader): Validation dataloader.
@@ -43,9 +43,9 @@ class BaseModel():
             save_img (bool): Whether to save images. Default: False.
         """
         if self.opt['dist']:
-            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img)
+            self.dist_validation(dataloader, current_iter, tb_logger, save_img=save_img, save_img_path=save_img_path)
         else:
-            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img)
+            self.dist_validation(dataloader, current_iter, tb_logger, save_img=save_img, save_img_path=save_img_path)
 
     def _initialize_best_metric_results(self, dataset_name):
         """Initialize the best metric results dict for recording the best metric value and iteration."""
