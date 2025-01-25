@@ -268,7 +268,7 @@ class ImageRestorationModel1(BaseModel):
             self.metric_results = {}
             for folder, seq_index in dataset.splite_seqs_index.items():
                 self.metric_results[folder] = torch.zeros(
-                    len(seq_index["seq_index"]), len(self.opt['val']['metrics']), dtype=torch.float32, device='cuda')
+                    len(seq_index["seq_index"])-2, len(self.opt['val']['metrics']), dtype=torch.float32, device='cuda')
         self._initialize_best_metric_results(dataset_name)
 
         rank, world_size = get_dist_info()
