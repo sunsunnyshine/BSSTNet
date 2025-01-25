@@ -72,7 +72,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: experiments/vdv_NAFNet/models/net_g_latest.pth
+  pretrain_network_g: model_zoos/NAFNet-Focus-0125.pth
   strict_load_g: True
   resume_state: ~
 
