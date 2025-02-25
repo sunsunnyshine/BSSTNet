@@ -34,7 +34,8 @@ datasets:
     io_backend:
       type: disk
 
-    num_frame: 20
+    num_frame: 48
+    num_frame_overlapping: 2
 
 path:
   pretrain_network_g: model_zoos/BSST_vdv2.pth

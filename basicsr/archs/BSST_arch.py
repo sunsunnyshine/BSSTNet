@@ -1124,8 +1124,18 @@ class BSST(nn.Module):
 
         trans_feats = self.softsplit(input_feats.view(b * t, c, h, w), n, self.fold_feat_size)
 
-        trans_feats = self.transsqattn(trans_feats, self.fold_feat_size, qmasks, kvmasks)
+        # Standard Transformer
+        Standard = False
+        if Standard:
+            qmasks = [torch.ones(qmask.shape).to(qmask.device) for qmask in qmasks]
+            kvmasks = [torch.ones(kvmask.shape).to(kvmask.device) for kvmask in kvmasks]
 
+        # 测量GPU内存
+        torch.cuda.reset_peak_memory_stats()
+        trans_feats = self.transsqattn(trans_feats, self.fold_feat_size, qmasks, kvmasks)
+        torch.cuda.synchronize()
+        max_memory = torch.cuda.max_memory_allocated() / 1024 / 1024 /1024  # 转换为GB
+        print('max_memory:', max_memory)
         trans_feats = self.softcomp(trans_feats, t, self.fold_feat_size)
 
         trans_feats = trans_feats.view(b, t, c, h, w)

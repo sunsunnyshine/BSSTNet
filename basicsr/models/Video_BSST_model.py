@@ -5,6 +5,8 @@
 # Copyright 2018-2020 BasicSR Authors
 # ------------------------------------------------------------------------
 import torch
+import time
+from thop import profile
 from torch import distributed as dist
 from collections import OrderedDict
 from tqdm import tqdm
@@ -275,6 +277,7 @@ class ModelBSST(BaseModel):
             W = torch.zeros_like(E)
             focus_E = torch.zeros(b, t, 1, h, w)
             focus_W = torch.zeros_like(focus_E)
+            start_time = time.time()
             for h_idx in h_idx_list:
                 for w_idx in w_idx_list:
 
@@ -288,6 +291,9 @@ class ModelBSST(BaseModel):
                          w_idx // 4:w_idx // 4 + size_patch_testing // 4]
                     bw = self.bw[..., h_idx // 4:h_idx // 4 + size_patch_testing // 4,
                          w_idx // 4:w_idx // 4 + size_patch_testing // 4]
+                    # flops, params = profile(self.net_g, inputs=(in_patch, pm_patch, flows_forwards, flows_backwards, fw, bw))
+                    # print(f"Flops: {flops}, Params: {params}")
+                    # print(f"GFlops: {flops / 1e9 / in_patch.shape[1]}, GParams: {params / 1e6}")
                     out_patch, focus = self.net_g(in_patch, pm_patch, flows_forwards, flows_backwards, fw, bw)
 
                     out_patch = out_patch.detach().cpu().reshape(b, t, c, size_patch_testing, size_patch_testing)
@@ -323,7 +329,8 @@ class ModelBSST(BaseModel):
                         focus_patch)
                     focus_W[..., h_idx:(h_idx + size_patch_testing), w_idx:(w_idx + size_patch_testing)].add_(
                         focus_patch_mask)
-
+            end_time = time.time()
+            print(f"Speed Time: {(end_time - start_time)/h_idx_list.__len__()/w_idx_list.__len__()}")
             output = E.div_(W)
             focus_output = focus_E.div_(focus_W)
         self.output = output[:, :, :, :, :]

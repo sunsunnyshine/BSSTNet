@@ -470,7 +470,7 @@ class VideoRecurrentTestDatasetlocal(VideoDeblurTestDataset):
         self.folders = sorted(list(set(self.data_info['folder'])))
         self.splite_seqs_index = {}
         num_frame_testing = opt['num_frame']
-        num_frame_overlapping = 4
+        num_frame_overlapping = opt['num_frame_overlapping']
         stride = max(1, num_frame_testing - num_frame_overlapping)
         self.seq_names = []
         if opt['num_frame'] != -1:
