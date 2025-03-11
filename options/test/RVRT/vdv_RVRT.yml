@@ -52,13 +52,15 @@ datasets:
     scale_factor: 4
     meta_info_file: basicsr/data/meta_info/VDV_test.txt
     cache_data: false
+    save_img: true
     io_backend:
       type: disk
 
-    num_frame: 20
+    num_frame: 30
 
 path:
-  pretrain_network_g: experiments/vdv_RVRT/models/net_g_12500.pth
+  pretrain_network_g: model_zoos/RVRT_GoPro_16frames.pth
+  visualization: ./results/RVRT_true_scene
   strict_load_g: true
   resume_state: ~
 
@@ -87,24 +89,12 @@ train:
 # validation settings
 val:
   val_freq: 1000
-  save_img: false
+  save_img: True
   crop_size: 256
   max_minibatch: 1
 
-  metrics:
-    psnr: # metric name, can be arbitrary
-      type: calculate_psnr
-      crop_border: 0
-      test_y_channel: false
-    ssim:
-      type: ssim_calculate
-    weighted_psnr:
-      type: calculate_weighted_psnr
-      crop_border: 0
-      test_y_channel: false
-    weighted_ssim:
-        type: weighted_ssim_calculate
-    
+  metrics: ~
+
 # logging settings
 logger:
   print_freq: 10

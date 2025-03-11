@@ -56,11 +56,14 @@ class BaseModel():
 
         # add a dataset record
         record = dict()
-        for metric, content in self.opt['val']['metrics'].items():
-            better = content.get('better', 'higher')
-            init_val = float('-inf') if better == 'higher' else float('inf')
-            record[metric] = dict(better=better, val=init_val, iter=-1)
-        self.best_metric_results[dataset_name] = record
+        if self.opt['val']['metrics'] is not None:
+            for metric, content in self.opt['val']['metrics'].items():
+                if metric is None:
+                    break
+                better = content.get('better', 'higher')
+                init_val = float('-inf') if better == 'higher' else float('inf')
+                record[metric] = dict(better=better, val=init_val, iter=-1)
+            self.best_metric_results[dataset_name] = record
 
     def _update_best_metric_result(self, dataset_name, metric, val, current_iter):
         if self.best_metric_results[dataset_name][metric]['better'] == 'higher':
