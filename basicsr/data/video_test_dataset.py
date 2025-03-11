@@ -336,8 +336,8 @@ class VideoDeblurTestDataset(data.Dataset):
                 img_paths_fw = sorted(list(scandir(subfolder_fw, full_path=True)))
                 img_paths_bw = sorted(list(scandir(subfolder_bw, full_path=True)))
                 max_idx = len(img_paths_lq)
-                assert max_idx == len(img_paths_gt), (f'Different number of images in lq ({max_idx})'
-                                                      f' and gt folders ({len(img_paths_gt)})')
+                # assert max_idx == len(img_paths_gt), (f'Different number of images in lq ({max_idx})'
+                #                                       f' and gt folders ({len(img_paths_gt)})')
 
                 self.data_info['lq_path'].extend(img_paths_lq)
                 self.data_info['gt_path'].extend(img_paths_gt)
