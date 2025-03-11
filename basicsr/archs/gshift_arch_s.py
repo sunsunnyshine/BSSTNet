@@ -53,6 +53,7 @@ class CALayer(nn.Module):
         # global average pooling: feature --> point
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         # feature channel downscale and upscale --> channel weight
+        reduction = 1
         self.conv_du = nn.Sequential(
                 nn.Conv2d(channel, channel // reduction, 1, padding=0, bias=bias),
                 nn.ReLU(inplace=True),
@@ -70,6 +71,7 @@ class CALayer2(nn.Module):
         # global average pooling: feature --> point
         self.avg_pool = nn.AdaptiveAvgPool2d(1)
         # feature channel downscale and upscale --> channel weight
+        reduction = 1 
         self.conv_du = nn.Sequential(
                 nn.Conv2d(channel, channel // reduction, 1, padding=0, bias=bias),
                 nn.ReLU(inplace=True),
@@ -153,10 +155,11 @@ class CAB(nn.Module):
 class RepConv(nn.Module):
     def __init__(self, n_feat, kernel_size, bias):
         super(RepConv, self).__init__()
-        self.conv_1 = nn.Conv2d(n_feat, n_feat, kernel_size, bias=bias, padding=kernel_size//2, groups=n_feat//8)
-        self.conv_2 = nn.Conv2d(n_feat, n_feat, 3, bias=bias, padding=1, groups=n_feat//8)
+        self.conv_1 = nn.Conv2d(n_feat, n_feat, kernel_size, bias=bias, padding=kernel_size//2, groups=n_feat)
+        self.conv_2 = nn.Conv2d(n_feat, n_feat, 3, bias=bias, padding=1, groups=n_feat)
     def forward(self, x):
         res_1 = self.conv_1(x)
+        # return res_1
         res_2 = self.conv_2(x)
         return res_1 + res_2 + x
 class RepConv2(nn.Module):
@@ -445,18 +448,10 @@ class Encoder_shift_block(nn.Module):
         self.encoder_level1_1 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number), CAB1(n_feat, 5, reduction, bias=bias, act=act)]
         self.encoder_level1_2 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number) , CAB1(n_feat, 5, reduction, bias=bias, act=act)]
         self.encoder_level1_3 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number), CAB1(n_feat, 5, reduction, bias=bias, act=act)]
-        self.encoder_level1_4 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number) , CAB1(n_feat, 5, reduction, bias=bias, act=act)]
-        self.encoder_level1_5 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number), CAB1(n_feat, 5, reduction, bias=bias, act=act)]
-        self.encoder_level1_6 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number) , CAB1(n_feat, 5, reduction, bias=bias, act=act)]
-        self.encoder_level1_7 = [CAB2(n_feat, 5, reduction, bias=bias, act=act, add_channel=8*self.number), CAB1(n_feat, 5, reduction, bias=bias, act=act)]
         self.encoder_level1 = nn.Sequential(*self.encoder_level1)
         self.encoder_level1_1 = nn.Sequential(*self.encoder_level1_1)
         self.encoder_level1_2 = nn.Sequential(*self.encoder_level1_2)
         self.encoder_level1_3 = nn.Sequential(*self.encoder_level1_3)
-        self.encoder_level1_4 = nn.Sequential(*self.encoder_level1_4)
-        self.encoder_level1_5 = nn.Sequential(*self.encoder_level1_5)
-        self.encoder_level1_6 = nn.Sequential(*self.encoder_level1_6)
-        self.encoder_level1_7 = nn.Sequential(*self.encoder_level1_7)
         #self.shift_conv = nn.Conv2d(8*self.number,8*self.number,5, bias=False,padding=2,groups=8*self.number)
         #self.shift_conv.weight = torch.nn.Parameter(generate_kernels(h=5,l=8*self.number,n=self.number))
         #self.shift_conv.requires_grad = False
@@ -502,25 +497,21 @@ class Encoder_shift_block(nn.Module):
         slice_c = C // div
         if reverse:
             slice_c = -slice_c
-        y1 = x.view(1,B*C,H,W)
-        y1 = torch.roll(y1, slice_c,1).view(B,C,H,W)
-        kernel_size = 5
+        y = x.view(1,B*C,H,W)
+        y = torch.roll(y, slice_c,1).view(B,C,H,W)
+        kernel_size = 1
         if reverse == False:
-            y = torch.cat((x[0:1], y1[1:]), dim=0)
             hw = y[:,0:8*self.number,...]
             # other = y[:,slice_c:,...]
         else:
-            y = torch.cat((y1[0:-1],x[-1:]), dim=0)
             hw = y[:,-8*self.number:,...]
             # other = y[:,0:-slice_c,...]
-        # hw_shifts = self.shift_conv1(hw)
         hw = self.spatial_shift2(hw)
-        # for _ in range(kernel_size):
-        #     hw = self.shift_conv(hw)
-        # print(torch.sum(torch.abs(hw_shifts-hw)), torch.mean(hw_shifts))
-        # exit(0)
-        # y_hw_shifts = torch.cat((y, hw_shifts), dim=1)
-        # exit(0)
+        #with torch.cuda.amp.autocast(enabled=False):
+        #    hw = hw.float()
+        #    # s_out = self.spatial_shift2(hw)
+        #    for _ in range(kernel_size):
+        #        hw = F.conv2d(hw, kernel, stride=1, padding=2, groups=8*self.number)
         return torch.cat((y, hw), dim=1)
 
     def forward(self, x, reverse=0):
@@ -532,14 +523,6 @@ class Encoder_shift_block(nn.Module):
         x = self.encoder_level1_2(x)
         x = self.channel_shift(x, reverse=True)
         x = self.encoder_level1_3(x)
-        x = self.channel_shift(x)
-        x = self.encoder_level1_4(x)
-        x = self.channel_shift(x, reverse=True)
-        x = self.encoder_level1_5(x)
-        x = self.channel_shift(x)
-        x = self.encoder_level1_6(x)
-        x = self.channel_shift(x, reverse=True)
-        x = self.encoder_level1_7(x)
         return x
 class Encoder2(nn.Module):
     def __init__(self, n_features, kernel_size=3, reduction=4, bias=False, scale_unetfeats=48):
@@ -547,23 +530,15 @@ class Encoder2(nn.Module):
         n_feat = n_features
         scale_unetfeats = 0
         act = nn.PReLU()
-        n_feat0 = 24
+        n_feat0 = 14
         # n_feats = 48
         self.act = act
-        self.encoder_level1 = CAB(n_feat, kernel_size, reduction, bias=bias, act=act)
-        self.encoder_level1_1 = CAB(n_feat, kernel_size, reduction, bias=bias, act=act)
-        self.encoder_level2 = CAB(n_feat + scale_unetfeats, kernel_size, reduction, bias=bias, act=act)
-        self.encoder_level2_1 = CAB(n_feat + scale_unetfeats, kernel_size, reduction, bias=bias, act=act)
-        self.encoder_level3 = CAB(n_feat + scale_unetfeats*2, kernel_size, reduction, bias=bias, act=act)
-        self.encoder_level3_1 = CAB(n_feat + scale_unetfeats*2, kernel_size, reduction, bias=bias, act=act)
-
-        # self.encoder_level1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
-        # self.encoder_level1_1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
-        #self.encoder_level1_2 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
-        #self.encoder_level2 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
-        #self.encoder_level2_1 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
-        #self.encoder_level3 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
-        # self.encoder_level3_1 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
+        self.encoder_level1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
+        self.encoder_level1_1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
+        self.encoder_level1_2 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
+        self.encoder_level2 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
+        self.encoder_level2_1 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
+        self.encoder_level2_2 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
         # self.encoder_level3 = Encoder_shift_block(n_feat+(scale_unetfeats*2), kernel_size, reduction, bias)
         # self.encoder_level3_1 = Encoder_shift_block(n_feat+(scale_unetfeats*2), kernel_size, reduction, bias)
 
@@ -574,27 +549,26 @@ class Encoder2(nn.Module):
         # self.concat2= conv(n_feat, n_feat, kernel_size, bias=bias)
 
         self.down12 = DownSample(n_feat, scale_unetfeats)
-        self.down23 = DownSample(n_feat + scale_unetfeats, scale_unetfeats)
+        # self.down23 = DownSample(n_feat + scale_unetfeats, scale_unetfeats)
 
         self.decoder_level1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
         self.decoder_level1_1 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
         self.decoder_level1_2 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
-        self.decoder_level2 = Encoder_shift_block(n_feat, kernel_size, reduction, bias)
+        self.decoder_level2 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
         self.decoder_level2_1 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
-        self.decoder_level3 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
-        self.decoder_level3_1 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
+        self.decoder_level2_2 = Encoder_shift_block(n_feat+scale_unetfeats, kernel_size, reduction, bias)
         # self.decoder_level3 = Encoder_shift_block(n_feat+(scale_unetfeats*2), kernel_size, reduction, bias)
         # self.decoder_level3_1 = Encoder_shift_block(n_feat+(scale_unetfeats*2), kernel_size, reduction, bias)
 
         self.skip_attn1 = CAB(n_feat, kernel_size, reduction, bias=bias, act=act)
-        self.skip_attn2 = CAB(n_feat + scale_unetfeats, kernel_size, reduction, bias=bias, act=act)
+        # self.skip_attn2 = CAB(n_feat + scale_unetfeats, kernel_size, reduction, bias=bias, act=act)
         self.upsample0 = PixelShufflePack(n_feat, n_feat0, 2, upsample_kernel=3)
         self.skip_conv = CAB(n_feat0, kernel_size, reduction, bias=bias, act=act) #conv(n_feat, n_feat, kernel_size, bias=bias)
         self.out_conv = CAB(n_feat0, kernel_size, reduction, bias=bias, act=act)
-        self.conv_hr0 = conv(n_feat0*2, n_feat0, kernel_size, bias=True)
+        self.conv_hr0 = conv(n_feat0, n_feat0, kernel_size, bias=bias)
 
         self.up21 = SkipUpSample(n_feat, scale_unetfeats)
-        self.up32 = SkipUpSample(n_feat + scale_unetfeats, scale_unetfeats)
+        # self.up32 = SkipUpSample(n_feat + scale_unetfeats, scale_unetfeats)
         div = 4
         self.slice_c =  n_feat // div
     def channel_shift(self, x, div=2, reverse=False):
@@ -614,28 +588,27 @@ class Encoder2(nn.Module):
         x = self.down01(x)
         
         enc1 = self.encoder_level1(x)
-        enc11 = self.encoder_level1_1(enc1)
-        # enc11 = self.encoder_level1_2(enc11)
+        enc11 = self.encoder_level1_1(enc1, reverse=1)
+        enc11 = self.encoder_level1_2(enc11)
         enc1_down = self.down12(enc11)
         enc2 = self.encoder_level2(enc1_down)
-        enc22 = self.encoder_level2_1(enc2)
-        enc2_down = self.down23(enc22)
-        enc3 = self.encoder_level3(enc2_down)
-        enc33 = self.encoder_level3_1(enc3)
-        dec3 = self.decoder_level3(enc33)
-        dec33 = self.decoder_level3_1(dec3, reverse=1)
+        enc22 = self.encoder_level2_1(enc2, reverse=1)
+        enc22 = self.encoder_level2_2(enc22)
+        
         # x = dec33 + self.skip_attn2(enc22)
-        x = self.up32(dec33, self.skip_attn2(enc22))
-        dec2 = self.decoder_level2(x)
+        dec2 = self.decoder_level2(enc22)
         dec22 = self.decoder_level2_1(dec2, reverse=1)
+        dec22 = self.decoder_level2_2(dec22)
         x = self.up21(dec22, self.skip_attn1(enc11))
         # x = dec22 + self.skip_attn1(enc11)
         dec1 = self.decoder_level1(x)
         dec11 = self.decoder_level1_1(dec1, reverse=1)
         dec11 = self.decoder_level1_2(dec11)
-        dec11_out = self.conv_hr0(torch.cat((self.upsample0(dec11), self.skip_conv(shortcut)), dim=1))
+        dec11_out = self.conv_hr0(self.act(self.upsample0(dec11))) + self.skip_conv(shortcut)
         dec11_out = self.out_conv(dec11_out)
-        return dec11_out # [enc11, enc22, enc33], [dec11, dec22, dec33]
+        return dec11_out 
+
+
 
 
 class Decoder(nn.Module):
@@ -677,7 +650,7 @@ class Decoder(nn.Module):
 class TFR_UNet(nn.Module):
     def __init__(self, n_feat0, n_feat, kernel_size, reduction, act, bias, scale_unetfeats):
         super(TFR_UNet, self).__init__()
-        scale_unetfeats = 12
+        scale_unetfeats = 4
         self.encoder_level1 = [CAB(n_feat0, kernel_size, reduction, bias=bias, act=act) for _ in range(1)]
         self.encoder_level2 = [CAB(n_feat0 + scale_unetfeats, kernel_size, reduction, bias=bias, act=act) for _ in
                                range(3)]
@@ -718,26 +691,23 @@ class TFR_UNet(nn.Module):
         return dec1
 
 
-@ARCH_REGISTRY.register()
+
 class GShiftNet(nn.Module):
 
     def __init__(self, n_features=48, future_frames=1, past_frames=1):
         super(GShiftNet, self).__init__()
-        # self.para = para
         self.n_feats = n_features
-        # n_feat = n_features
-        self.n_feats2 = 80
+        self.n_feats2 = 64
         self.num_ff = future_frames
         self.num_fb = past_frames
         self.ds_ratio = 4
         self.device = torch.device('cuda')
-        self.n_feats0 = 24
-
+        self.n_feats0 = 14
         self.feat_extract = nn.Sequential(nn.Conv2d(3, self.n_feats0, 3, 1, 1),
             CAB(self.n_feats0, 3, 4, bias=False, act=nn.PReLU()))
         self.conv_last = conv(self.n_feats0, 3, 5, bias=False) 
         self.conv_trans = conv(self.n_feats0, self.n_feats0, 3, bias=True)
-        self.lrelu = nn.PReLU() 
+        self.lrelu = nn.PReLU()
         self.stage1 = Encoder2(self.n_feats2)
         self.orb1 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
         self.orb2 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
@@ -748,7 +718,6 @@ class GShiftNet(nn.Module):
         self.rorb1 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
         self.rorb2 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
         self.rorb3 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
-        # self.orb4 = 
         self.rorb4 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
         self.rorb5 = TFR_UNet(self.n_feats0, self.n_feats, kernel_size=3, reduction=4, act=nn.PReLU(), bias=False, scale_unetfeats=0)
         self.rconcat = nn.Conv2d(self.n_feats0*3, self.n_feats0, 3, 1, 1, bias=True)
@@ -760,18 +729,14 @@ class GShiftNet(nn.Module):
         x0 = self.orb1(x0)
         x0 = self.orb2(x0)
         x0 = self.orb3(x0)
-        x0 = self.orb4(x0)
-        res0 = self.orb5(x0)
-        res0 = res0 + shortcut
-        return res0, self.conv_trans(res0) # , stage0_img
+        res0 = x0 + shortcut
+        return res0, self.conv_trans(res0)
     def stage2(self, x0, sam1_feats, decoder_out0):
         x = self.rconcat(torch.cat((x0, sam1_feats, decoder_out0), dim=1))
         shortcut = x 
         x = self.rorb1(x)
         x = self.rorb2(x)
         x = self.rorb3(x)
-        x = self.rorb4(x)
-        x = self.rorb5(x)
         x = x + shortcut
         x = self.conv_last(x)
         return x
@@ -781,7 +746,7 @@ class GShiftNet(nn.Module):
         x = x[0]
         shortcut = x
         x0 = self.feat_extract(x)
-        sam_features0, sam_features = self.stage0(x0) 
-        decoder_outs = self.stage1(sam_features) 
+        sam_features0, sam_features = self.stage0(x0)
+        decoder_outs = self.stage1(sam_features)
         output_features = self.stage2(x0[self.num_fb:frames-self.num_ff], sam_features0[self.num_fb:frames-self.num_ff], decoder_outs[self.num_fb:frames-self.num_ff])
         return output_features + shortcut[self.num_fb:frames-self.num_ff]

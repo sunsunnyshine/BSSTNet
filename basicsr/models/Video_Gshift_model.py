@@ -20,7 +20,7 @@ from basicsr.utils.logger import AverageMeter
 from basicsr.archs.RAFT.raft import RAFT
 from basicsr.archs.RAFT.utils.utils import InputPadder
 import math
-
+import os,cv2
 
 def get_dist_info():
     if dist.is_available():
@@ -241,7 +241,7 @@ class ImageRestorationModel1(BaseModel):
         self.output = output[:, :, :, :, :]
         self.net_g.train()
 
-    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False):
+    def validation(self, dataloader, current_iter, tb_logger, wandb_logger=None, save_img=False,save_img_path=None):
         """Validation function.
         Args:
             dataloader (torch.utils.data.DataLoader): Validation dataloader.
@@ -251,13 +251,13 @@ class ImageRestorationModel1(BaseModel):
             save_img (bool): Whether to save images. Default: False.
         """
         if self.opt['dist']:
-            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
+            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, save_img_path,rgb2bgr=True,
                                  use_image=True)
         else:
-            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
+            self.dist_validation(dataloader, current_iter, tb_logger, wandb_logger, save_img,save_img_path, rgb2bgr=True,
                                  use_image=True)
 
-    def dist_validation(self, dataloader, current_iter, tb_logger, wandb_logger, save_img, rgb2bgr=True,
+    def dist_validation(self, dataloader, current_iter, tb_logger, wandb_logger, save_img, save_img_path=None,rgb2bgr=True,
                         use_image=True):
         dataset = dataloader.dataset
         dataset_name = dataloader.dataset.opt['name']
@@ -314,11 +314,18 @@ class ImageRestorationModel1(BaseModel):
                 visuals['gt'] = visuals['gt'][:, 2:-2, ...]
                 visuals['hm'] = visuals['hm'][:, 2:-2, ...]
             torch.cuda.empty_cache()
+            if save_img:
+                save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
+                if not os.path.exists(save_img_path_scene):
+                    os.makedirs(save_img_path_scene)
             if i < num_seq:
                 for idx in range(visuals['result'].size(1)):
                     result = visuals['result'][0, idx, :, :, :]
                     result_img = tensor2img([result])  # uint8, bgr
                     metric_data['img'] = result_img
+                    if save_img:
+                        whole_idx = int(folder.split('_')[-1]) + idx
+                        cv2.imwrite(os.path.join(save_img_path_scene, f'{whole_idx:05d}.png'), result_img)
                     if 'gt' in visuals:
                         gt = visuals['gt'][0, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr

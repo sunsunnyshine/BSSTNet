@@ -19,7 +19,7 @@ from basicsr.utils.registry import ARCH_REGISTRY
 from basicsr.ops.dcn import ModulatedDeformConvPack
 from basicsr.archs.propainter.sparse_transformer import TemporalSparseTransformerBlock, SoftComp, SoftSplit
 from basicsr.archs.propainter.recurrent_flow_completion import RecurrentFlowCompleteNet
-from basicsr.archs.gshift_arch import Encoder_shift_block, CAB, PixelShufflePack, SkipUpSample, conv, CAB1, CAB2
+from basicsr.archs.gshift_arch_s import Encoder_shift_block, CAB, PixelShufflePack, SkipUpSample, conv, CAB1, CAB2
 from basicsr.archs.blur_percep_util import BlurDetector
 
 
