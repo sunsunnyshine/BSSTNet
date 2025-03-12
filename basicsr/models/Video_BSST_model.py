@@ -238,13 +238,13 @@ class ModelBSST(BaseModel):
         loss_dict['l_pix_object_local_blur'] = l_pix_object_local_blur
 
         # Loss: 0.01 * l_pix + 0.1 * l_pix_object + l_pix_object_local_blur + 0* Regularization
-        l_total = 0.01 * l_pix + 0.1 * l_pix_object + l_pix_object_local_blur + 0 * sum(
+        l_total = l_pix + l_pix_object + l_pix_object_local_blur + 0 * sum(
             p.sum() for p in self.net_g.parameters())
 
         # l_total.backward()
         self.scaler.scale(l_total).backward()
         self.scaler.unscale_(self.optimizer_g)
-        torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.001)
+        torch.nn.utils.clip_grad_norm_(self.net_g.parameters(), 0.01)
         self.scaler.step(self.optimizer_g)
         self.scaler.update()
 

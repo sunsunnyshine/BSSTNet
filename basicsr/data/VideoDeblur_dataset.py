@@ -147,7 +147,7 @@ class DeblurRecurrentDataset(data.Dataset):
                 img_bw_residual_path = f'{clip_name}/{neighbor:05d}'
             else:
                 img_lq_path = self.lq_root / clip_name / f'{neighbor:05d}.{self.file_end}'
-                img_gt_path = self.gt_root / clip_name / f'{neighbor:05d}.{self.file_end}'
+                img_gt_path = self.gt_root / clip_name / f'{neighbor:05d}.jpg'
                 img_pm_path = self.pm_root / clip_name / f'{neighbor:05d}.{self.file_end}'
                 img_hm_path = self.hm_root / clip_name / f'{neighbor:05d}.jpg'
                 img_fw_residual_path = self.fw_residual_root / clip_name / f'{neighbor:05d}.flo'
