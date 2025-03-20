@@ -692,6 +692,7 @@ class TFR_UNet(nn.Module):
 
 
 
+@ARCH_REGISTRY.register()
 class GShiftNet(nn.Module):
 
     def __init__(self, n_features=48, future_frames=1, past_frames=1):

@@ -30,12 +30,12 @@ datasets:
       type: disk
     save_img: True
 
-    num_frame: 40
+    num_frame: 10
 
 
 
 path:
-  pretrain_network_g: model_zoos/GShift_gopro.pth
+  pretrain_network_g: experiments/vdv_Shift-Net_20250312/models/net_g_2500.pth
   strict_load_g: True
   resume_state: ~
   visualization: ./results/

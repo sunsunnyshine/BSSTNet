@@ -24,6 +24,7 @@ datasets:
     dataroot_fw_residual: ./datasets/VDV/test/fw_residual
     dataroot_bw_residual: ./datasets/VDV/test/bw_residual
     scale_factor: 4
+    meta_info_file: basicsr/data/meta_info/VDV_test.txt
 
     cache_data: false
     io_backend:
@@ -40,7 +41,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: experiments/vdv_NAFNet_Focus/models/net_g_5000.pth
+  pretrain_network_g: experiments/vdv_NAFNet_Focus_first_train/models/net_g_10000.pth
   strict_load_g: True
   resume_state: ~
 
