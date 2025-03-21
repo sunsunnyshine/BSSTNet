@@ -56,11 +56,11 @@ datasets:
     io_backend:
       type: disk
 
-    num_frame: 30
+    num_frame: 20
 
 path:
-  pretrain_network_g: model_zoos/RVRT_GoPro_16frames.pth
-  visualization: ./results/RVRT_true_scene
+  pretrain_network_g: /media/yjh/yjh/LightReBlur/code/BSSTNetMy/experiments/vdv_RVRT/models/net_g_2500.pth
+  visualization: ./results/RVRT_false_VRT
   strict_load_g: true
   resume_state: ~
 

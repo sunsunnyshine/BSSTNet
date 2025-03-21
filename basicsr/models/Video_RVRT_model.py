@@ -336,7 +336,7 @@ class ModelRVRT(BaseModel):
 
             torch.cuda.empty_cache()
             if save_img:
-                save_img_path_scene = os.path.join(save_img_path, val_data['folder'])
+                save_img_path_scene = os.path.join(save_img_path, str(current_iter), folder)
                 if not os.path.exists(save_img_path_scene):
                     os.makedirs(save_img_path_scene)
             if i < num_seq:
@@ -351,7 +351,7 @@ class ModelRVRT(BaseModel):
                         gt = visuals['gt'][0, idx, :, :, :]
                         gt_img = tensor2img([gt])  # uint8, bgr
                         metric_data['img2'] = gt_img
-                    if 'hm' in visuals and 'focus' in visuals:
+                    if 'hm' in visuals:
                         hm = visuals['hm'][0, idx, :, :, :]
                         focus_mask = tensor2img([hm])
                         metric_data['mask'] = focus_mask

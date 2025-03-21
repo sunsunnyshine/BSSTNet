@@ -85,8 +85,9 @@ datasets:
     dataroot_fw_residual: ./datasets/VDV/test/fw_residual
     dataroot_bw_residual: ./datasets/VDV/test/bw_residual
     scale_factor: 4
-
+    meta_info_file: basicsr/data/meta_info/VDV_test.txt
     cache_data: false
+    save_img: true
     io_backend:
       type: disk
 
@@ -94,6 +95,7 @@ datasets:
 
 path:
   pretrain_network_g: model_zoos/RVRT_DVD_16frames.pth
+  visualization: ./results/RVRT_20250321
   strict_load_g: true
   resume_state: ~
 
@@ -106,10 +108,10 @@ train:
 
   scheduler:
     type: TrueCosineAnnealingLR
-    T_max: 20000
+    T_max: 15000
     eta_min: !!float 1e-7
 
-  total_iter: 20000
+  total_iter: 15000
   warmup_iter: 1000 # no warm up
   fix_flow: 10000
 
@@ -121,8 +123,8 @@ train:
 
 # validation settings
 val:
-  val_freq: 1000
-  save_img: false
+  val_freq: 500
+  save_img: True
   crop_size: 256
   max_minibatch: 1
 
