@@ -41,7 +41,7 @@ network_g:
 
 # path
 path:
-  pretrain_network_g: experiments/vdv_NAFNet_Focus_first_train/models/net_g_10000.pth
+  pretrain_network_g: experiments/vdv_NAFNet_Focus_first_train/models/net_g_4000.pth
   strict_load_g: True
   resume_state: ~
 

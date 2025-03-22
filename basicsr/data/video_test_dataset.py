@@ -6,7 +6,7 @@ from torch.utils import data as data
 from basicsr.data.data_util import duf_downsample, generate_frame_indices, read_img_seq, read_flo_seq
 from basicsr.utils import get_root_logger, scandir
 from basicsr.utils.registry import DATASET_REGISTRY
-
+import os
 
 @DATASET_REGISTRY.register()
 class VideoTestDataset(data.Dataset):
@@ -335,6 +335,12 @@ class VideoDeblurTestDataset(data.Dataset):
                 img_paths_hm = sorted(list(scandir(subfolder_hm, full_path=True)))
                 img_paths_fw = sorted(list(scandir(subfolder_fw, full_path=True)))
                 img_paths_bw = sorted(list(scandir(subfolder_bw, full_path=True)))
+                img_paths_lq = [os.path.join(subfolder_lq, '00056.png')]
+                img_paths_gt = [os.path.join(subfolder_gt, '00056.png')]
+                img_paths_pm = [os.path.join(subfolder_pm, '00056.png')]
+                img_paths_hm = [os.path.join(subfolder_hm, '00056.jpg')]
+                img_paths_fw = [os.path.join(subfolder_fw, '00056.flo')]
+                img_paths_bw = [os.path.join(subfolder_bw, '00056.flo')]
                 max_idx = len(img_paths_lq)
                 # assert max_idx == len(img_paths_gt), (f'Different number of images in lq ({max_idx})'
                 #                                       f' and gt folders ({len(img_paths_gt)})')
